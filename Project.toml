@@ -1,0 +1,13 @@
+name = "SmoreFit"
+uuid = "3e3f2270-f616-47a3-a2d7-3d5e12f50e92"
+authors = ["Daniel Bergman <danielrbergman@gmail.com> and contributors"]
+version = "0.0.1"
+
+[compat]
+julia = "1.10.10"
+
+[extras]
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[targets]
+test = ["Test"]
