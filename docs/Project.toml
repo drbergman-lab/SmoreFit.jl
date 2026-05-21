@@ -1,0 +1,3 @@
+[deps]
+Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
+SmoreFit = "3e3f2270-f616-47a3-a2d7-3d5e12f50e92"
