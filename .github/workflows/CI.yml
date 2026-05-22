@@ -37,6 +37,10 @@ jobs:
           version: ${{ matrix.version }}
           arch: ${{ matrix.arch }}
       - uses: julia-actions/cache@v3
+        with: # seems to be necessary for the 1.13.0-beta3 release
+          cache-artifacts: true
+          cache-packages: true
+          cache-registries: false
       - name: Add BergmanLabRegistry
         run: julia -e 'import Pkg; Pkg.Registry.add("General"); Pkg.Registry.add(Pkg.RegistrySpec(url="https://github.com/drbergman-lab/BergmanLabRegistry.git"))'
       - uses: julia-actions/julia-buildpkg@v1
@@ -60,6 +64,10 @@ jobs:
         with:
           version: '1'
       - uses: julia-actions/cache@v3
+        with: # seems to be necessary for the 1.13.0-beta3 release
+          cache-artifacts: true
+          cache-packages: true
+          cache-registries: false
       - name: Add BergmanLabRegistry
         run: julia -e 'import Pkg; Pkg.Registry.add("General"); Pkg.Registry.add(Pkg.RegistrySpec(url="https://github.com/drbergman-lab/BergmanLabRegistry.git"))'
       - uses: julia-actions/julia-buildpkg@v1
