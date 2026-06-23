@@ -2,15 +2,14 @@
 #
 # `problem.data` is a single-param-set CMData (the real observations). We fit the SM to it and
 # run the same profile likelihood UQ that produced the per-cohort CM-side profiles, so both
-# sides live in the same SM-parameter space. `_uq` is internal to SmoreBase but documented as
-# awaiting exactly this higher-level caller.
+# sides live in the same SM-parameter space.
 function _profileAgainstData(
     problem::SMFitProblem,
     p0,
     profile_options::ProfileLikelihood,
 )
     fit = fitSurrogate(problem, p0)
-    return SmoreBase._uq(problem, fit, profile_options; param_set_index = 1)
+    return quantifyUncertainty(problem, fit, profile_options; param_set_index = 1)
 end
 
 # Convenience overload: build the SMFitProblem from its pieces and delegate.
