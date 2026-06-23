@@ -26,7 +26,7 @@ _logistic(t, p, _c) = reshape(
         d    = CMData(μ = vec(μ), σ = noise .* ones(length(t)), times = t)
         prob = SMFitProblem(sm, d, sm_prior)
         fit  = fitSurrogate(prob, P0)
-        return SmoreBase._uq(prob, fit, ProfileLikelihood(n_points = 12))
+        return quantifyUncertainty(prob, fit, ProfileLikelihood(n_points = 12))
     end
 
     uq_results = [_profileAt(c) for c in cvals]

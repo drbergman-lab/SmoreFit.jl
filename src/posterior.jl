@@ -11,7 +11,7 @@ Two streams of profile information are combined:
 
 1. **CM-side, already done** — `uq_results[i]` is the SM's profile likelihood against the CM
    cohort point at row `i` of `cm_sample.params`. These were produced upstream (e.g. by
-   SmoreBase's `_uq` over the cohort) and are passed in unchanged.
+   SmoreBase's `quantifyUncertainty` over the cohort) and are passed in unchanged.
 2. **Data-side, computed here** — the SM is fit and then profiled against the real
    observations. The ingredients for *that* fit-and-profile step are what `problem` (or the
    `(sm, data, loss)` triple, with `sm_prior` taken from `uq_results[1].fit_result.prior`)
