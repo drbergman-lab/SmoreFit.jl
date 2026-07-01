@@ -21,7 +21,7 @@ using SmoreBase, SmoreFit
 # Inputs you already have from the upstream pipeline:
 #   sm         :: AbstractSurrogateModel             — the SM used for cohort profiling
 #   data       :: CMData (n_param_sets == 1)         — real observational data
-#   uq_results :: Vector{ProfileLikelihoodResult}    — one per cohort point (from SmoreBase._uq)
+#   uq_results :: Vector{ProfileLikelihoodResult}    — one per cohort point (from quantifyUncertainty)
 #   cm_params  :: Matrix [n_cohort × n_cm_params]    — row-aligned with uq_results
 #   cm_prior   :: ParameterPrior                     — CM parameter names + support
 
