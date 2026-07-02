@@ -1,7 +1,7 @@
 """
     CMPosteriorResult
 
-Result of [`buildPosterior`](@ref): which CM cohort parameter sets are consistent with the
+Result of [`buildPosterior`](@ref): which CM param_sets are consistent with the
 real-world data, scored by the chosen bridge method.
 
 Both a hard accept/reject set (`accepted`) and the continuous `scores` are always stored; the
@@ -9,22 +9,22 @@ Both a hard accept/reject set (`accepted`) and the continuous `scores` are alway
 retained (with its grid `axes` for a `GridCMSample`), acceptance and scores can be
 reshaped back onto the CM grid via [`acceptedGrid`](@ref) / [`scoreGrid`](@ref).
 
-For grid-aware results, the per-cohort SM-parameter CI tables (`lb_table`, `ub_table`) and a
+For grid-aware results, the per-cm_param_set SM-parameter CI tables (`lb_table`, `ub_table`) and a
 prebuilt CM-grid bounds interpolator (`get_bounds`) are stored so that interior CM points (not
-in the cohort) can be queried via [`inPosterior`](@ref) and [`posteriorScore`](@ref). The full
+among the cm_param_sets) can be queried via [`inPosterior`](@ref) and [`posteriorScore`](@ref). The full
 `uq_results` are also retained for inspection and any future re-analysis.
 
 # Fields
 - `cm_sample` — CM parameter points (`AbstractCMSample`), row-aligned with `accepted`/`scores`
-- `cm_names` — CM parameter names (from `cm_prior`)
-- `accepted` — `BitVector`; `true` where the cohort point's consistency score exceeds `acceptance_tol`
-- `scores` — consistency score per cohort point, in `[0, 1]`
+- `cm_names` — CM parameter names (defaults from `cm_sample.names`; override via `buildPosterior`'s `cm_names` kwarg)
+- `accepted` — `BitVector`; `true` where the cm_param_set's consistency score exceeds `acceptance_tol`
+- `scores` — consistency score per cm_param_set, in `[0, 1]`
 - `bridge` — the bridge method used (`:box_overlap`, `:data_trace_in_box`, `:symmetric_trace`)
 - `posterior` — `:accept` or `:graded`
 - `acceptance_tol` — threshold used for `accepted`; default for interior queries
 - `data_profiles` — the SM profile likelihood computed against the real data (kept for inspection)
-- `uq_results` — the cohort CM-side profiles, one per row of `cm_sample.params`
-- `lb_table`, `ub_table` — `[n_cohort × n_sm_params]` per-cohort SM-parameter CI lower/upper bounds
+- `uq_results` — the CM param_sets' profiles, one per row of `cm_sample.params`
+- `lb_table`, `ub_table` — `[n_cm_param_sets × n_sm_params]` per-cm_param_set SM-parameter CI lower/upper bounds
   derived from `uq_results` (with `nothing` falling back to the profile's swept-range extreme,
   matching the `:box_overlap` bridge)
 - `get_bounds` — closure `θ_cm -> (lb, ub)` interpolating the CI tables across the CM grid;
@@ -57,7 +57,7 @@ sample set over CM parameter space.
 
 # Example
 ```julia
-post    = buildPosterior(sm, data, uq_results, cm_params, cm_prior)
+post    = buildPosterior(sm, data, uq_results, cm_params)
 samples = posteriorSamples(post)   # rows are CM parameter vectors consistent with the data
 ```
 """
@@ -67,12 +67,12 @@ posteriorSamples(r::CMPosteriorResult) = r.cm_sample.params[r.accepted, :]
     posteriorWeights(r::CMPosteriorResult) -> Vector{Float64}
 
 Consistency scores normalized to sum to one — a simple graded posterior (discrete
-distribution) over the CM cohort points. All-zero if no cohort point is consistent.
+distribution) over the CM param_sets. All-zero if no CM param_set is consistent.
 
 # Example
 ```julia
-post = buildPosterior(sm, data, uq_results, cm_params, cm_prior; posterior = :graded)
-w    = posteriorWeights(post)   # weight per cohort point, sums to 1
+post = buildPosterior(sm, data, uq_results, cm_params; posterior = :graded)
+w    = posteriorWeights(post)   # weight per cm_param_set, sums to 1
 ```
 """
 function posteriorWeights(r::CMPosteriorResult)
@@ -88,7 +88,7 @@ Reshape `accepted` onto the CM parameter grid. Requires a `GridCMSample` layout.
 
 # Example
 ```julia
-post = buildPosterior(sm, data, uq_results, cm_params, cm_prior)   # cm_params a regular grid
+post = buildPosterior(sm, data, uq_results, cm_params)   # cm_params a regular grid
 acceptedGrid(post)   # Bool array of size length.(cm_sample.axes)
 ```
 """
@@ -101,7 +101,7 @@ Reshape `scores` onto the CM parameter grid. Requires a `GridCMSample` layout.
 
 # Example
 ```julia
-post = buildPosterior(sm, data, uq_results, cm_params, cm_prior)   # cm_params a regular grid
+post = buildPosterior(sm, data, uq_results, cm_params)   # cm_params a regular grid
 scoreGrid(post)   # Float64 array of size length.(cm_sample.axes)
 ```
 """

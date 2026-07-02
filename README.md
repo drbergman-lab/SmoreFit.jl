@@ -11,7 +11,7 @@ Posterior inference on complex model (CM) parameter space for the [Smore](https:
 
 ## How it works
 
-The Smore pipeline produces, for each CM cohort parameter set, a **profile likelihood** of the surrogate model's parameters fit to the CM-generated data. SmoreFit then profiles the *same* surrogate against the **real observational data**, putting both in the same SM-parameter space, and bridges the two — a cohort point is in the posterior iff its SM-parameter confidence region overlaps the data's.
+The Smore pipeline produces, for each CM param_set, a **profile likelihood** of the surrogate model's parameters fit to the CM-generated data. SmoreFit then profiles the *same* surrogate against the **real observational data**, putting both in the same SM-parameter space, and bridges the two — a cm_param_set is in the posterior iff its SM-parameter confidence region overlaps the data's.
 
 ## Usage
 
@@ -19,13 +19,14 @@ The Smore pipeline produces, for each CM cohort parameter set, a **profile likel
 using SmoreBase, SmoreFit
 
 # Inputs you already have from the upstream pipeline:
-#   sm         :: AbstractSurrogateModel             — the SM used for cohort profiling
-#   data       :: CMData (n_param_sets == 1)         — real observational data
-#   uq_results :: Vector{ProfileLikelihoodResult}    — one per cohort point (from quantifyUncertainty)
-#   cm_params  :: Matrix [n_cohort × n_cm_params]    — row-aligned with uq_results
-#   cm_prior   :: ParameterPrior                     — CM parameter names + support
+#   sm         :: AbstractSurrogateModel             — the SM used for CM param_set profiling
+#   data       :: CMData (n_cm_param_sets == 1)         — real observational data
+#   uq_results :: Vector{ProfileLikelihoodResult}    — one per cm_param_set (from quantifyUncertainty)
+#   cm_params  :: Matrix [n_cm_param_sets × n_cm_params]    — row-aligned with uq_results
 
-post = buildPosterior(sm, data, uq_results, cm_params, cm_prior)
+post = buildPosterior(sm, data, uq_results, cm_params)
+# CM parameter names default to auto-generated "cm_1", ...; pass `cm_names = [...]` to override,
+# or attach names to a GridCMSample/ScatteredCMSample up front and pass that instead of cm_params.
 
 posteriorSamples(post)   # accepted CM parameter vectors (the posterior as a sample set)
 posteriorWeights(post)   # scores normalized to a discrete graded posterior
@@ -39,7 +40,7 @@ scoreGrid(post)          # scores reshaped onto the CM grid
 
 ```julia
 problem = SMFitProblem(sm, data, sm_prior)
-post    = buildPosterior(problem, uq_results, cm_params, cm_prior)
+post    = buildPosterior(problem, uq_results, cm_params)
 ```
 
 The `problem` form uses `problem.loss`; the `(sm, data, …)` form takes a `loss` kwarg (default `GaussianNLL()`).
@@ -65,7 +66,7 @@ A `nothing` CI bound (unidentified on that side) falls back to the profile's swe
 
 ### Interior CM-point queries
 
-The result stores the cohort `uq_results` and a prebuilt CI-bound interpolator over the CM grid, so you can query any interior CM point without re-running anything:
+The result stores the CM param_sets' `uq_results` and a prebuilt CI-bound interpolator over the CM grid, so you can query any interior CM point without re-running anything:
 
 ```julia
 posteriorScore(post, [θ1, θ2])              # score ∈ [0,1] at one interior point
@@ -75,17 +76,17 @@ inPosterior(post, queries; tol = 0.05)      # batch + tol override; queries is [
 
 Interior queries require a `GridCMSample` layout and `bridge ∈ (:box_overlap, :data_trace_in_box)`; `:symmetric_trace` and scattered layouts raise a clear `ArgumentError`. The interpolator is selected via the `interp` kwarg on `buildPosterior` (default `LinearCIInterp()`).
 
-> **Note on cohort sampling density.** Linear bound interpolation is reliable when consecutive
-> cohort CIs overlap each other *in SM-parameter space* — equivalently, when the bound surface
-> moves only a fraction of its own width between adjacent cohort points. The relevant
+> **Note on CM param_set sampling density.** Linear bound interpolation is reliable when consecutive
+> CM param_sets' CIs overlap each other *in SM-parameter space* — equivalently, when the bound surface
+> moves only a fraction of its own width between adjacent cm_param_sets. The relevant
 > dimensionless ratio compares SM-space quantities top and bottom: how far the bound shifts
 > (an SM-parameter quantity, with the CM step folded into the finite-difference numerator)
 > versus how wide the CI is (also an SM-parameter quantity). Three different things make that
-> ratio large — a steep manifold, tight CIs, or a coarse CM cohort — and the interpolator
+> ratio large — a steep manifold, tight CIs, or coarse CM param_set spacing — and the interpolator
 > can't distinguish them; in each case the interpolated box jumps past the data box, and
-> interior queries can return zero even near a cohort point that *is* in the posterior. The
-> only knob the user controls is cohort density, so the corrective action is the same in all
-> three: add cohort points where the geometry is changing fast. A refinement diagnostic that
+> interior queries can return zero even near a cm_param_set that *is* in the posterior. The
+> only knob the user controls is param_set density, so the corrective action is the same in all
+> three: add cm_param_sets where the geometry is changing fast. A refinement diagnostic that
 > surfaces this is a planned next step.
 
 ## Background
@@ -103,12 +104,12 @@ Interior queries require a `GridCMSample` layout and `bridge ∈ (:box_overlap, 
 
 - [x] `buildPosterior` — posterior on CM parameter space given real-world data + SM UQ from
   SmoreBase. Profiles the SM against the data, then bridges those profiles against the
-  per-cohort CM profiles via one of three selectable methods (`:box_overlap`,
+  per-cm_param_set CM profiles via one of three selectable methods (`:box_overlap`,
   `:data_trace_in_box`, `:symmetric_trace`). Returns a grid-aware `CMPosteriorResult`
   (`posteriorSamples`, `posteriorWeights`, `acceptedGrid`, `scoreGrid`). Real data is a
   single-param-set `CMData`; CM parameter locations use the shared `AbstractCMSample` types.
   Dispatches on either `(sm, data, …)` or an `SMFitProblem` already in hand.
 - [x] Interior CM-point queries — `inPosterior(post, θ_cm)` and `posteriorScore(post, θ_cm)`
-  (with batch + `tol` override). Interpolates the per-cohort SM-parameter CI bounds across
+  (with batch + `tol` override). Interpolates the per-cm_param_set SM-parameter CI bounds across
   the CM grid via `LinearCIInterp` and evaluates the chosen bridge against the data profile.
   `GridCMSample` + `:box_overlap` / `:data_trace_in_box` only; other configurations error.

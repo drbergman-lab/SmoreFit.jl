@@ -1,7 +1,7 @@
 # Interior CM-point queries on CMPosteriorResult.
 #
-# The cohort defines a posterior at the sampled CM points. For an interior CM point (not in
-# the cohort), we interpolate the per-cohort SM-parameter CI bounds across the CM grid via
+# The CM param_sets define a posterior at the sampled CM points. For an interior CM point (not
+# among the CM param_sets), we interpolate the per-cm_param_set SM-parameter CI bounds across the CM grid via
 # SmoreBase's `_buildBoundsInterpolant`, then evaluate the chosen bridge against the data
 # profile at the interpolated box. v1 supports `GridCMSample` + `:box_overlap` /
 # `:data_trace_in_box` only; `:symmetric_trace` and non-grid layouts error clearly.
@@ -34,7 +34,7 @@ Requires `post.cm_sample isa GridCMSample` and `post.bridge in (:box_overlap, :d
 
 # Example
 ```julia
-post = buildPosterior(sm, data, uq_results, cm_params, cm_prior)   # cm_params a regular grid
+post = buildPosterior(sm, data, uq_results, cm_params)   # cm_params a regular grid
 posteriorScore(post, [θ1, θ2])
 posteriorScore(post, [θ1_a θ2_a; θ1_b θ2_b])   # batch
 ```
@@ -67,7 +67,7 @@ Requires `post.cm_sample isa GridCMSample` and `post.bridge in (:box_overlap, :d
 
 # Example
 ```julia
-post = buildPosterior(sm, data, uq_results, cm_params, cm_prior)   # cm_params a regular grid
+post = buildPosterior(sm, data, uq_results, cm_params)   # cm_params a regular grid
 inPosterior(post, [θ1, θ2])
 inPosterior(post, queries; tol = 0.05)
 ```
