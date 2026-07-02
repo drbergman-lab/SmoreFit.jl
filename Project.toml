@@ -1,6 +1,6 @@
 name = "SmoreFit"
 uuid = "3e3f2270-f616-47a3-a2d7-3d5e12f50e92"
-version = "0.3.0"
+version = "0.4.0"
 authors = ["Daniel Bergman <danielrbergman@gmail.com> and contributors"]
 
 [deps]
@@ -10,7 +10,7 @@ Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
 
 [compat]
 Distributions = "0.25.125"
-SmoreBase = "0.3"
+SmoreBase = "0.4"
 Statistics = "1.10"
 julia = "1.10.10"
 

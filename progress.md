@@ -71,3 +71,84 @@ sampling/reparameterization-dependent (we sample evenly in the profiled paramete
 length). The boolean accept ("any point inside") is invariant; only the graded fraction is the
 proxy. The principled replacement is an arc-length / Jacobian-weighted integral. Also dreamed:
 a trace-distance "street area" measure between the two profile traces.
+
+---
+
+## Session: `buildPosterior` drops `cm_prior` (2026-07-02)
+
+### Goal
+Flagged during a cross-repo SmoreBase review session: `cm_prior::ParameterPrior` was a required
+`buildPosterior` argument used **only** to extract `.names` — a whole prior (bounds +
+distributions) just to label the posterior. SmoreBase's `GridCMSample`/`ScatteredCMSample` were
+extended in the same session to carry `names` natively (see SmoreBase's "CM-sample unification"
+entry above, and its own progress.md "ODE SM refinements + batched profile-likelihood UQ"
+session), so the redundancy could be closed here.
+
+### Decision
+Drop `cm_prior` from all 4 `buildPosterior` methods. The `cm_sample`-input methods gain
+`cm_names::Vector{String} = cm_sample.names`; the raw-matrix-input methods gain
+`cm_names::Union{Nothing,Vector{String}} = nothing`, threaded into
+`CMSample(cm_params; names = cm_names)` and left to the delegated call's own default to pick up
+from there (no double-specification of the same default logic in two places).
+
+Considered keeping `cm_prior` as an optional override alongside `cm_names` — rejected as two
+knobs for one job; `cm_names` alone (defaulting from `cm_sample`) covers every case `cm_prior`
+did here, since SmoreFit never used `cm_prior`'s distributions (unlike SmoreGSA's
+`runSensitivity`, which genuinely needs them for inverse-CDF sampling and keeps its own
+`cm_prior` argument unchanged).
+
+### Status
+Implemented on `feature/build-posterior-cm-names`. ~16 call sites in `test/runtests.jl` updated
+(dropped trailing `cm_prior`); new `cm_names` sub-testset added. Depends on the SmoreBase
+`names` field landing first (local `dev`-linked path dependency, no version bump needed).
+
+---
+
+## Session: `cm_param_set` rename (2026-07-02)
+
+### Goal
+SmoreBase renamed `param_set` → `cm_param_set` throughout (see its progress.md) to disambiguate
+CM parameter vectors from SM parameters once a single call can involve both. SmoreFit called the
+same concept "cohort"/"cohort point" in its own docs and had two internal helpers
+(`_cohortMLE`, `_meanCohortMLE`) named after that term — updated to match.
+
+### Decision
+- Calls into SmoreBase's renamed API updated: `n_param_sets` → `n_cm_param_sets`, `CMData(...;
+  param_sets=...)` → `cm_param_sets=` in tests.
+- Internal helpers renamed: `_cohortMLE` → `_cmParamSetMLE`, `_meanCohortMLE` →
+  `_meanCmParamSetMLE`.
+- "Cohort"/"cohort point" prose replaced with "CM param_set" throughout `posterior.jl`,
+  `bridge.jl`, `interior.jl`, `data_profiles.jl`, `types/posterior_result.jl`, PRD.md, README.md.
+- **Caught during testing:** the mechanical rename briefly introduced a local variable named
+  `n_cm_param_sets` inside `buildPosterior` (from a pre-existing `n_cohort` local) that shadowed
+  the imported `SmoreBase.n_cm_param_sets` function in the same scope — Julia's whole-function
+  scoping rules turned the earlier `n_cm_param_sets(problem.data)` call into an
+  `UndefVarError`. Renamed the local to `n_ps` (matching the naming already used for the same
+  quantity in SmoreBase's `fitting.jl`).
+
+### Status
+Implemented on `feature/build-posterior-cm-names` (same branch as the `cm_names` work above,
+since both are part of the same terminology cleanup pass). Full test suite green (82 tests).
+
+---
+
+## Session: Copilot review fixes on PR #9 (2026-07-02)
+
+### Goal
+Copilot flagged 4 issues on the open PR: three "CM cm_param_set"-style duplicate-prefix rename
+artifacts (README.md, `types/posterior_result.jl`, `bridge.jl` — the same class of bug as
+SmoreBase's own rename sweep, just missed here), and one real gap: `buildPosterior`'s `cm_names`
+kwarg was never validated against the number of CM parameters (`size(cm_sample.params, 2)`), so
+a mismatched length would silently mislabel the posterior or blow up downstream in a consumer
+rather than failing at the source.
+
+### Decision
+- Fixed the three duplicate-"CM" prose spots.
+- Added a length check for `cm_names` in `buildPosterior`'s primary method, right alongside the
+  existing `uq_results`/`cm_sample` length check, throwing `ArgumentError` with the mismatched
+  lengths reported.
+- Added regression tests: mismatched `cm_names` on both the `cm_sample`-input and raw-matrix-input
+  forms.
+
+### Status
+Implemented on `feature/build-posterior-cm-names`. Full test suite green (84 tests).

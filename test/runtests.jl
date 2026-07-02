@@ -16,7 +16,7 @@ _logistic(t, p, _c) = reshape(
     P0       = [0.5 5.0]
     noise    = 0.02
 
-    # CM grid of 5 cohort points; CM parameter c sets the true SM growth rate r.
+    # CM grid of 5 cm_param_sets; CM parameter c sets the true SM growth rate r.
     cvals    = [1.0, 2.0, 3.0, 4.0, 5.0]
     rtrue(c) = 0.35 + 0.05 * c                            # r ∈ {0.40, …, 0.60}
     Ktrue    = 4.0
@@ -26,28 +26,27 @@ _logistic(t, p, _c) = reshape(
         d    = CMData(μ = vec(μ), σ = noise .* ones(length(t)), times = t)
         prob = SMFitProblem(sm, d, sm_prior)
         fit  = fitSurrogate(prob, P0)
-        return quantifyUncertainty(prob, fit, ProfileLikelihood(n_points = 12))
+        return quantifyUncertainty(ProfileLikelihood(n_points = 12), prob, fit, 1)
     end
 
     uq_results = [_profileAt(c) for c in cvals]
     cm_params  = reshape(cvals, :, 1)                     # [5 × 1], a regular grid
-    cm_prior   = ParameterPrior([1.0], [5.0]; names = ["c"])
 
-    # Real data generated at the center cohort (c = 3 → r = 0.50).
+    # Real data generated at the center CM param_set (c = 3 → r = 0.50).
     μ_data = _logistic(t, [rtrue(3.0), Ktrue], nothing)
     data   = CMData(μ = vec(μ_data), σ = noise .* ones(length(t)), times = t)
 
     @testset "bridge = $bridge" for bridge in (:box_overlap, :data_trace_in_box, :symmetric_trace)
-        post = buildPosterior(sm, data, uq_results, cm_params, cm_prior; bridge = bridge)
+        post = buildPosterior(sm, data, uq_results, cm_params; bridge = bridge)
         @test post isa CMPosteriorResult
         @test length(post.scores) == 5
         @test post.bridge == bridge
 
-        # The generating (center) cohort is accepted and scores highest.
+        # The generating (center) CM param_set is accepted and scores highest.
         @test post.accepted[3]
         @test argmax(post.scores) == 3
 
-        # Far cohorts have disjoint SM regions → rejected at the default tolerance.
+        # Far CM param_sets have disjoint SM regions → rejected at the default tolerance.
         @test !post.accepted[1]
         @test !post.accepted[5]
 
@@ -60,7 +59,7 @@ _logistic(t, p, _c) = reshape(
     end
 
     @testset "posterior outputs" begin
-        post    = buildPosterior(sm, data, uq_results, cm_params, cm_prior)
+        post    = buildPosterior(sm, data, uq_results, cm_params)
         samples = posteriorSamples(post)
         @test size(samples, 2) == 1
         @test size(samples, 1) == count(post.accepted)
@@ -76,8 +75,32 @@ _logistic(t, p, _c) = reshape(
         @test length(post.data_profiles.profiles) == 2
     end
 
+    @testset "cm_names" begin
+        # Raw matrix, no names given -> CMSample's auto-generated default.
+        post_default = buildPosterior(sm, data, uq_results, cm_params)
+        @test post_default.cm_names == ["cm_1"]
+
+        # cm_sample already carries names -> used as the default.
+        cm_sample_named = GridCMSample(cm_params; names = ["c"])
+        post_named = buildPosterior(sm, data, uq_results, cm_sample_named)
+        @test post_named.cm_names == ["c"]
+
+        # Explicit cm_names kwarg overrides the cm_sample default.
+        post_override = buildPosterior(sm, data, uq_results, cm_sample_named; cm_names = ["cm_override"])
+        @test post_override.cm_names == ["cm_override"]
+
+        # Explicit cm_names kwarg on the raw-matrix form threads through to the built CMSample.
+        post_matrix_named = buildPosterior(sm, data, uq_results, cm_params; cm_names = ["c"])
+        @test post_matrix_named.cm_names == ["c"]
+
+        # A cm_names length mismatched against the number of CM parameters must throw cleanly,
+        # not silently mislabel the posterior.
+        @test_throws ArgumentError buildPosterior(sm, data, uq_results, cm_sample_named; cm_names = ["too", "many"])
+        @test_throws ArgumentError buildPosterior(sm, data, uq_results, cm_params; cm_names = String[])
+    end
+
     @testset "graded posterior" begin
-        post = buildPosterior(sm, data, uq_results, cm_params, cm_prior; posterior = :graded)
+        post = buildPosterior(sm, data, uq_results, cm_params; posterior = :graded)
         @test post.posterior == :graded
         w = posteriorWeights(post)
         @test isapprox(sum(w), 1.0; atol = 1e-12)
@@ -90,32 +113,32 @@ _logistic(t, p, _c) = reshape(
         sm_prior = uq_results[1].fit_result.prior
         problem  = SMFitProblem(sm, data, sm_prior)
 
-        post_sm      = buildPosterior(sm, data, uq_results, cm_params, cm_prior)
-        post_problem = buildPosterior(problem, uq_results, cm_params, cm_prior)
+        post_sm      = buildPosterior(sm, data, uq_results, cm_params)
+        post_problem = buildPosterior(problem, uq_results, cm_params)
         @test post_problem.accepted == post_sm.accepted
         @test post_problem.scores   ≈  post_sm.scores
 
         # Same path with an explicit CMSample.
-        post_problem_sample = buildPosterior(problem, uq_results, CMSample(cm_params), cm_prior)
+        post_problem_sample = buildPosterior(problem, uq_results, CMSample(cm_params))
         @test post_problem_sample.accepted == post_sm.accepted
 
         # Validation propagates from the problem's data.
-        bad     = CMData(μ = rand(length(t), 2), σ = ones(length(t), 2), times = t, param_sets = 2)
+        bad     = CMData(μ = rand(length(t), 2), σ = ones(length(t), 2), times = t, cm_param_sets = 2)
         bad_prob = SMFitProblem(sm, bad, sm_prior)
-        @test_throws ArgumentError buildPosterior(bad_prob, uq_results, cm_params, cm_prior)
+        @test_throws ArgumentError buildPosterior(bad_prob, uq_results, cm_params)
     end
 
-    @testset "default p0 = mean of per-cohort MLEs" begin
-        # Regression: the default `p0` must be the cohort column-mean of *per-cohort* MLEs,
+    @testset "default p0 = mean of per-cm_param_set MLEs" begin
+        # Regression: the default `p0` must be the CM param_sets' column-mean of *per-cm_param_set* MLEs,
         # not whatever `uq_results[1].fit_result.parameters` happens to contain. To catch the
-        # failure mode where the default would silently collapse onto cohort point 1, we feed
+        # failure mode where the default would silently collapse onto cm_param_set 1, we feed
         # `buildPosterior` a `uq_results` constructed so that each entry's `fit_result` carries
-        # only its own row — and verify the data-fit init still averages across the cohort.
+        # only its own row — and verify the data-fit init still averages across the CM param_sets.
 
         per_point_uq = map(uq -> let
-            # Reduce fit_result.parameters to a single-row table containing only this cohort's
-            # MLE — mimics the user who fit each cohort point independently.
-            mle = SmoreFit._cohortMLE(uq)
+            # Reduce fit_result.parameters to a single-row table containing only this cm_param_set's
+            # MLE — mimics the user who fit each cm_param_set independently.
+            mle = SmoreFit._cmParamSetMLE(uq)
             fit = SMFitResult(
                 reshape(mle, 1, :),
                 [uq.fit_result.errors[1]],
@@ -129,35 +152,35 @@ _logistic(t, p, _c) = reshape(
 
         @test size(per_point_uq[1].fit_result.parameters, 1) == 1   # confirm the setup
 
-        # The default p0 from this per-cohort `uq_results` must equal the cohort column-mean.
-        cohort_mles = reduce(hcat, [SmoreFit._cohortMLE(uq) for uq in uq_results])
-        expected    = reshape(Statistics.mean(cohort_mles, dims = 2), 1, :)
-        @test SmoreFit._meanCohortMLE(per_point_uq) ≈ expected
+        # The default p0 from this per-cm_param_set `uq_results` must equal the CM param_sets' column-mean.
+        cm_param_set_mles = reduce(hcat, [SmoreFit._cmParamSetMLE(uq) for uq in uq_results])
+        expected    = reshape(Statistics.mean(cm_param_set_mles, dims = 2), 1, :)
+        @test SmoreFit._meanCmParamSetMLE(per_point_uq) ≈ expected
 
         # And `buildPosterior` produces the same posterior as the shared-fit form — i.e. the
         # default p0 doesn't silently degrade with the per-point construction.
-        post_shared    = buildPosterior(sm, data, uq_results,     cm_params, cm_prior)
-        post_per_point = buildPosterior(sm, data, per_point_uq,   cm_params, cm_prior)
+        post_shared    = buildPosterior(sm, data, uq_results,     cm_params)
+        post_per_point = buildPosterior(sm, data, per_point_uq,   cm_params)
         @test post_per_point.accepted == post_shared.accepted
         @test post_per_point.scores   ≈  post_shared.scores
     end
 
     @testset "interior queries" begin
-        post = buildPosterior(sm, data, uq_results, cm_params, cm_prior)   # :box_overlap
+        post = buildPosterior(sm, data, uq_results, cm_params)   # :box_overlap
 
-        # Reproduce stored scores/acceptance at the cohort points themselves.
+        # Reproduce stored scores/acceptance at the cm_param_sets themselves.
         for i in 1:5
             @test posteriorScore(post, [cvals[i]]) ≈ post.scores[i]
             @test inPosterior(post, [cvals[i]])    == post.accepted[i]
         end
 
-        # An interior CM point (off the cohort grid) that is also far from c = 3 — the
-        # cohort point that generated the data — is rejected. We don't assert acceptance of a
+        # An interior CM point (off the CM param_set grid) that is also far from c = 3 — the
+        # cm_param_set that generated the data — is rejected. We don't assert acceptance of a
         # *near* interior point: the data noise is narrow enough that the accepted window
-        # around c = 3 is much smaller than the cohort step, so any "close to c = 3" test
+        # around c = 3 is much smaller than the CM param_set step, so any "close to c = 3" test
         # would be brittle to grid spacing and noise. The robust half of the picture — far
         # from the data-generating point in CM space → score 0 — is what's tested here.
-        @test posteriorScore(post, [1.5]) == 0.0    # c = 1.5: between cohort c = 1 and c = 2, far from c = 3
+        @test posteriorScore(post, [1.5]) == 0.0    # c = 1.5: between CM param_sets c = 1 and c = 2, far from c = 3
         @test !inPosterior(post, [1.5])
 
         # Batch form agrees with point-by-point.
@@ -173,12 +196,12 @@ _logistic(t, p, _c) = reshape(
         @test inPosterior(post, [3.0]; tol = 2.0) == false  # impossible threshold
 
         # :symmetric_trace and ScatteredCMSample → clear errors.
-        post_sym = buildPosterior(sm, data, uq_results, cm_params, cm_prior; bridge = :symmetric_trace)
+        post_sym = buildPosterior(sm, data, uq_results, cm_params; bridge = :symmetric_trace)
         @test_throws ArgumentError posteriorScore(post_sym, [3.0])
         @test_throws ArgumentError inPosterior(post_sym, [3.0])
 
         scattered = ScatteredCMSample(cm_params)
-        post_sc = buildPosterior(sm, data, uq_results, scattered, cm_prior)
+        post_sc = buildPosterior(sm, data, uq_results, scattered)
         @test post_sc.get_bounds === nothing
         @test_throws ArgumentError posteriorScore(post_sc, [3.0])
     end
@@ -208,16 +231,16 @@ _logistic(t, p, _c) = reshape(
 
     @testset "validation" begin
         # data must have a single param set
-        bad = CMData(μ = rand(length(t), 2), σ = ones(length(t), 2), times = t, param_sets = 2)
-        @test_throws ArgumentError buildPosterior(sm, bad, uq_results, cm_params, cm_prior)
+        bad = CMData(μ = rand(length(t), 2), σ = ones(length(t), 2), times = t, cm_param_sets = 2)
+        @test_throws ArgumentError buildPosterior(sm, bad, uq_results, cm_params)
 
-        # uq_results length must match the number of cohort points
-        @test_throws ArgumentError buildPosterior(sm, data, uq_results[1:3], cm_params, cm_prior)
+        # uq_results length must match the number of cm_param_sets
+        @test_throws ArgumentError buildPosterior(sm, data, uq_results[1:3], cm_params)
 
         # unknown bridge method
-        @test_throws ArgumentError buildPosterior(sm, data, uq_results, cm_params, cm_prior; bridge = :nope)
+        @test_throws ArgumentError buildPosterior(sm, data, uq_results, cm_params; bridge = :nope)
 
         # unknown posterior mode
-        @test_throws ArgumentError buildPosterior(sm, data, uq_results, cm_params, cm_prior; posterior = :nope)
+        @test_throws ArgumentError buildPosterior(sm, data, uq_results, cm_params; posterior = :nope)
     end
 end

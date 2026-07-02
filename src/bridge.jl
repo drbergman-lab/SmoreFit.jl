@@ -1,6 +1,6 @@
 # Bridging two sets of SM-parameter profiles.
 #
-# Both the CM (per cohort point) and the real data, through the shared surrogate model,
+# Both the CM (per cm_param_set) and the real data, through the shared surrogate model,
 # induce confidence regions in the same SM-parameter space. A CM parameter set is consistent
 # with the data iff its SM region overlaps the data's SM region. Profiles only give a
 # 1-D-per-parameter view, so we approximate each region either as a hyperrectangle ("box")
@@ -95,7 +95,7 @@ function _consistencyBox(
     end
 end
 
-# Consistency score in [0, 1] between a CM cohort point's profiles and the data's profiles.
+# Consistency score in [0, 1] between a CM param_set's profiles and the data's profiles.
 function _consistency(cm_plr::ProfileLikelihoodResult, data_plr::ProfileLikelihoodResult, bridge::Symbol)
     cm_lo, cm_hi = _profileBox(cm_plr)
     if bridge === :symmetric_trace
