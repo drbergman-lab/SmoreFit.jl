@@ -4,10 +4,11 @@
 Result of [`buildPosterior`](@ref): which CM param_sets are consistent with the
 real-world data, scored by the chosen bridge method.
 
-Both a hard accept/reject set (`accepted`) and the continuous `scores` are always stored; the
-`posterior` field records which one the caller asked to emphasize. Because `cm_sample` is
-retained (with its grid `axes` for a `GridCMSample`), acceptance and scores can be
-reshaped back onto the CM grid via [`acceptedGrid`](@ref) / [`scoreGrid`](@ref).
+Both a hard accept/reject set (`accepted`) and the continuous `scores` are always stored; which
+one to use is a choice made at read time via [`posteriorSamples`](@ref) (accept/reject) or
+[`posteriorWeights`](@ref) (graded). Because `cm_sample` is retained (with its grid `axes` for a
+`GridCMSample`), acceptance and scores can be reshaped back onto the CM grid via
+[`acceptedGrid`](@ref) / [`scoreGrid`](@ref).
 
 For grid-aware results, the per-cm_param_set SM-parameter CI tables (`lb_table`, `ub_table`) and a
 prebuilt CM-grid bounds interpolator (`get_bounds`) are stored so that interior CM points (not
@@ -17,11 +18,10 @@ among the cm_param_sets) can be queried via [`inPosterior`](@ref) and [`posterio
 # Fields
 - `cm_sample` — CM parameter points (`AbstractCMSample`), row-aligned with `accepted`/`scores`
 - `cm_names` — CM parameter names (defaults from `cm_sample.names`; override via `buildPosterior`'s `cm_names` kwarg)
-- `accepted` — `BitVector`; `true` where the cm_param_set's consistency score exceeds `acceptance_tol`
+- `accepted` — `BitVector`; `true` where the cm_param_set's consistency score exceeds `min_score`
 - `scores` — consistency score per cm_param_set, in `[0, 1]`
 - `bridge` — the bridge method used (`:box_overlap`, `:data_trace_in_box`, `:symmetric_trace`)
-- `posterior` — `:accept` or `:graded`
-- `acceptance_tol` — threshold used for `accepted`; default for interior queries
+- `min_score` — threshold used for `accepted`; default for interior queries
 - `data_profiles` — the SM profile likelihood computed against the real data (kept for inspection)
 - `uq_results` — the CM param_sets' profiles, one per row of `cm_sample.params`
 - `lb_table`, `ub_table` — `[n_cm_param_sets × n_sm_params]` per-cm_param_set SM-parameter CI lower/upper bounds
@@ -40,8 +40,7 @@ struct CMPosteriorResult
     accepted       :: BitVector
     scores         :: Vector{Float64}
     bridge         :: Symbol
-    posterior      :: Symbol
-    acceptance_tol :: Float64
+    min_score      :: Float64
     data_profiles  :: ProfileLikelihoodResult
     uq_results     :: Vector{ProfileLikelihoodResult}
     lb_table       :: Matrix{Float64}
@@ -71,7 +70,7 @@ distribution) over the CM param_sets. All-zero if no CM param_set is consistent.
 
 # Example
 ```julia
-post = buildPosterior(sm, data, uq_results, cm_params; posterior = :graded)
+post = buildPosterior(sm, data, uq_results, cm_params)
 w    = posteriorWeights(post)   # weight per cm_param_set, sums to 1
 ```
 """

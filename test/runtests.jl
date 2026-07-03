@@ -100,8 +100,7 @@ _logistic(t, p, _c) = reshape(
     end
 
     @testset "graded posterior" begin
-        post = buildPosterior(sm, data, uq_results, cm_params; posterior = :graded)
-        @test post.posterior == :graded
+        post = buildPosterior(sm, data, uq_results, cm_params)
         w = posteriorWeights(post)
         @test isapprox(sum(w), 1.0; atol = 1e-12)
         @test argmax(w) == 3
@@ -188,12 +187,12 @@ _logistic(t, p, _c) = reshape(
         s_batch = posteriorScore(post, queries)
         s_loop  = [posteriorScore(post, queries[k, :]) for k in 1:size(queries, 1)]
         @test s_batch ≈ s_loop
-        @test inPosterior(post, queries) == BitVector(s_loop .> post.acceptance_tol)
+        @test inPosterior(post, queries) == BitVector(s_loop .> post.min_score)
 
-        # tol override widens or tightens the threshold.
-        widest = inPosterior(post, [1.5]; tol = -1.0)
+        # min_score override widens or tightens the threshold.
+        widest = inPosterior(post, [1.5]; min_score = -1.0)
         @test widest == true                # any score > -1 ⇒ accepted
-        @test inPosterior(post, [3.0]; tol = 2.0) == false  # impossible threshold
+        @test inPosterior(post, [3.0]; min_score = 2.0) == false  # impossible threshold
 
         # :symmetric_trace and ScatteredCMSample → clear errors.
         post_sym = buildPosterior(sm, data, uq_results, cm_params; bridge = :symmetric_trace)
@@ -239,8 +238,5 @@ _logistic(t, p, _c) = reshape(
 
         # unknown bridge method
         @test_throws ArgumentError buildPosterior(sm, data, uq_results, cm_params; bridge = :nope)
-
-        # unknown posterior mode
-        @test_throws ArgumentError buildPosterior(sm, data, uq_results, cm_params; posterior = :nope)
     end
 end

@@ -152,3 +152,30 @@ rather than failing at the source.
 
 ### Status
 Implemented on `feature/build-posterior-cm-names`. Full test suite green (84 tests).
+
+---
+
+## Session: Drop dead `posterior` field/kwarg; rename `acceptance_tol`/`tol` → `min_score` (2026-07-02)
+
+### Goal
+Review of `CMPosteriorResult` surfaced two naming/API issues: the `posterior::Symbol`
+kwarg/field (`:accept`/`:graded`) is validated and stored but never consulted by any
+computation — `posteriorSamples` always reads `accepted`, `posteriorWeights` always reads
+`scores`, regardless of its value — so it's dead weight rather than a real mode switch.
+Separately, `acceptance_tol` (on `buildPosterior`/`CMPosteriorResult`) and `tol` (on
+`inPosterior`) name a *score* threshold where a **lower** value accepts *more* cm_param_sets —
+backwards from what "tolerance" implies.
+
+### Decision
+- Dropped `posterior` entirely: no kwarg on any `buildPosterior` method, no field on
+  `CMPosteriorResult`. Which view to use is now purely a choice of accessor
+  (`posteriorSamples` vs. `posteriorWeights`), which was already true in practice.
+- Renamed `acceptance_tol` → `min_score` throughout (kwarg, field, docstrings, README, PRD).
+- Renamed `inPosterior`'s `tol` kwarg → `min_score` to match, defaulting directly to
+  `post.min_score` rather than `nothing` + a ternary (simpler now that both positional- and
+  keyword-argument forms can reference `post` in the default expression).
+- Removed the now-meaningless "unknown posterior mode" validation test.
+
+### Status
+Implemented on `feature/drop-posterior-field-rename-min-score`. Full test suite green (82
+tests, one fewer than before since the dead `posterior`-validation test was removed).

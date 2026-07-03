@@ -57,11 +57,11 @@ function posteriorScore(post::CMPosteriorResult, queries::AbstractMatrix)
 end
 
 """
-    inPosterior(post::CMPosteriorResult, θ_cm::AbstractVector; tol = nothing) -> Bool
-    inPosterior(post::CMPosteriorResult, queries::AbstractMatrix; tol = nothing) -> BitVector
+    inPosterior(post::CMPosteriorResult, θ_cm::AbstractVector; min_score = post.min_score) -> Bool
+    inPosterior(post::CMPosteriorResult, queries::AbstractMatrix; min_score = post.min_score) -> BitVector
 
 Is the interior CM parameter point in the posterior? Equivalent to `posteriorScore(post, …) >
-tol`. `tol === nothing` (default) uses `post.acceptance_tol`.
+min_score`, defaulting to `post.min_score`.
 
 Requires `post.cm_sample isa GridCMSample` and `post.bridge in (:box_overlap, :data_trace_in_box)`.
 
@@ -69,23 +69,21 @@ Requires `post.cm_sample isa GridCMSample` and `post.bridge in (:box_overlap, :d
 ```julia
 post = buildPosterior(sm, data, uq_results, cm_params)   # cm_params a regular grid
 inPosterior(post, [θ1, θ2])
-inPosterior(post, queries; tol = 0.05)
+inPosterior(post, queries; min_score = 0.05)
 ```
 """
 function inPosterior(
     post::CMPosteriorResult,
     θ_cm::AbstractVector;
-    tol::Union{Nothing,Real} = nothing,
+    min_score::Real = post.min_score,
 )
-    threshold = tol === nothing ? post.acceptance_tol : tol
-    return posteriorScore(post, θ_cm) > threshold
+    return posteriorScore(post, θ_cm) > min_score
 end
 
 function inPosterior(
     post::CMPosteriorResult,
     queries::AbstractMatrix;
-    tol::Union{Nothing,Real} = nothing,
+    min_score::Real = post.min_score,
 )
-    threshold = tol === nothing ? post.acceptance_tol : tol
-    return BitVector(posteriorScore(post, queries) .> threshold)
+    return BitVector(posteriorScore(post, queries) .> min_score)
 end

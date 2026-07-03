@@ -41,20 +41,24 @@ The SM fitting step (SmoreBase) produces SM parameters and their uncertainty for
   - `bridge::Symbol = :box_overlap` — overlap test between the two SM-parameter confidence
     regions: `:box_overlap` (symmetric box-vs-box), `:data_trace_in_box` (data profile trace
     points inside the CM box), `:symmetric_trace`
-  - `posterior::Symbol = :accept` — `:accept` (hard set) or `:graded` (continuous scores)
-  - `profile_options::ProfileLikelihood`, `p0`, `loss`, `acceptance_tol`, `interp`
+  - `profile_options::ProfileLikelihood`, `p0`, `loss`, `min_score`, `interp`
 - Output: `CMPosteriorResult` — stores `accepted` and `scores` per cm_param_set plus the
   `cm_sample` (grid-aware), `cm_names`, the CM param_sets' `uq_results`, derived `lb_table`/`ub_table`,
-  and a prebuilt bounds interpolator. Accessors: `posteriorSamples`, `posteriorWeights`,
-  `acceptedGrid`, `scoreGrid`.
+  and a prebuilt bounds interpolator. Accessors: `posteriorSamples` (hard accept/reject set) and
+  `posteriorWeights` (normalized scores, a graded posterior), `acceptedGrid`, `scoreGrid` — which
+  view of the posterior to use is a choice made at read time via these accessors, not a stored mode.
 - **Breaking change from earlier versions:** `cm_prior::ParameterPrior` is no longer a
   `buildPosterior` argument (it was only ever used for `.names`). Callers who still build a
   `cm_prior` for other reasons should attach its names to `cm_sample` (or pass `cm_names`
-  directly) instead of passing the whole prior.
+  directly) instead of passing the whole prior. The `posterior::Symbol` kwarg (and
+  `CMPosteriorResult.posterior` field) has been removed — it was validated and stored but never
+  consulted by any computation; `acceptance_tol` is renamed `min_score` (and `inPosterior`'s
+  `tol` kwarg likewise), since a *lower* value accepts *more* cm_param_sets — the opposite of
+  what "tolerance" suggests.
 - Interior CM-point queries (no re-fitting required):
-  - `posteriorScore(post, θ_cm) -> Float64` and `inPosterior(post, θ_cm; tol = nothing) -> Bool`,
-    plus matrix-batch forms. The CM-side SM-parameter CI bounds are interpolated across the CM
-    grid (selected by the `interp` kwarg, default `LinearCIInterp()`); the bridge then runs
+  - `posteriorScore(post, θ_cm) -> Float64` and `inPosterior(post, θ_cm; min_score = post.min_score) ->
+    Bool`, plus matrix-batch forms. The CM-side SM-parameter CI bounds are interpolated across
+    the CM grid (selected by the `interp` kwarg, default `LinearCIInterp()`); the bridge then runs
     against `post.data_profiles`. Restricted to `GridCMSample` + `:box_overlap` /
     `:data_trace_in_box`; `:symmetric_trace` and scattered layouts raise `ArgumentError`.
 
