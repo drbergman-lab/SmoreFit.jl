@@ -43,14 +43,13 @@ wrapped with `CMSample` (from SmoreBase: grid if possible, else scattered).
   auto-generated `"cm_1", ...` when a raw `cm_params` matrix is supplied without names attached
 - `bridge::Symbol = :box_overlap` — overlap test: `:box_overlap` (symmetric box-vs-box),
   `:data_trace_in_box` (data profile trace points inside the CM box), or `:symmetric_trace`
-- `posterior::Symbol = :accept` — `:accept` (hard accept/reject set) or `:graded` (use scores)
 - `profile_options::ProfileLikelihood = ProfileLikelihood()` — settings for the **data**
   profile (the CM-side profiles in `uq_results` are already final and not recomputed)
 - `p0 = nothing` — initial guess for the **data** fit (`[1 × n_sm_params]`); defaults to the
   column-mean of the CM param_sets' SM fits
 - `loss::AbstractLoss = GaussianNLL()` — loss for the **data** fit, *only on the
   `(sm, data, …)` forms*; the problem form uses `problem.loss`
-- `acceptance_tol::Real = 0.0` — a cm_param_set is accepted iff its score exceeds this; also
+- `min_score::Real = 0.0` — a cm_param_set is accepted iff its score exceeds this; also
   the default threshold for [`inPosterior`](@ref) interior queries
 - `interp::AbstractCIInterpolator = LinearCIInterp()` — how the per-cm_param_set SM-parameter CI
   bounds are interpolated across the CM grid for interior queries; only consulted when
@@ -79,10 +78,9 @@ function buildPosterior(
     cm_sample::AbstractCMSample;
     cm_names::Vector{String} = cm_sample.names,
     bridge::Symbol = :box_overlap,
-    posterior::Symbol = :accept,
     profile_options::ProfileLikelihood = ProfileLikelihood(),
     p0 = nothing,
-    acceptance_tol::Real = 0.0,
+    min_score::Real = 0.0,
     interp::AbstractCIInterpolator = LinearCIInterp(),
 )
     n_cm_param_sets(problem.data) == 1 || throw(ArgumentError(
@@ -99,15 +97,12 @@ function buildPosterior(
     bridge in (:box_overlap, :data_trace_in_box, :symmetric_trace) || throw(ArgumentError(
         "unknown bridge :$bridge; expected :box_overlap, :data_trace_in_box, or :symmetric_trace"
     ))
-    posterior in (:accept, :graded) || throw(ArgumentError(
-        "unknown posterior :$posterior; expected :accept or :graded"
-    ))
 
     p0_eff   = p0 === nothing ? _meanCmParamSetMLE(uq_results) : p0
     data_plr = _profileAgainstData(problem, p0_eff, profile_options)
 
     scores   = Float64[_consistency(uq, data_plr, bridge) for uq in uq_results]
-    accepted = BitVector(scores .> acceptance_tol)
+    accepted = BitVector(scores .> min_score)
 
     # Per-cm_param_set SM-parameter CI tables, used both to build the grid bounds interpolant for
     # interior queries and stored for later inspection / re-analysis. Uses the same swept-edge
@@ -130,8 +125,8 @@ function buildPosterior(
     end
 
     return CMPosteriorResult(
-        cm_sample, cm_names, accepted, scores, bridge, posterior,
-        Float64(acceptance_tol), data_plr,
+        cm_sample, cm_names, accepted, scores, bridge,
+        Float64(min_score), data_plr,
         Vector{ProfileLikelihoodResult}(uq_results), lb_table, ub_table, get_bounds,
     )
 end

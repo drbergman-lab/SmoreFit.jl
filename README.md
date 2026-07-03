@@ -59,19 +59,20 @@ A `nothing` CI bound (unidentified on that side) falls back to the profile's swe
 
 ### Posterior representation
 
-`posterior::Symbol`:
+Both views are always available on `CMPosteriorResult` — which one to use is a choice made when
+you call the accessor:
 
-- `:accept` *(default)* — hard accept/reject via `score > acceptance_tol`. `posteriorSamples` gives the accepted CM vectors.
-- `:graded` — keep the scores as a continuous graded posterior. `posteriorWeights` normalizes them.
+- `posteriorSamples(post)` — hard accept/reject via `score > min_score`; the accepted CM vectors.
+- `posteriorWeights(post)` — the scores kept as a continuous graded posterior, normalized to sum to one.
 
 ### Interior CM-point queries
 
 The result stores the CM param_sets' `uq_results` and a prebuilt CI-bound interpolator over the CM grid, so you can query any interior CM point without re-running anything:
 
 ```julia
-posteriorScore(post, [θ1, θ2])              # score ∈ [0,1] at one interior point
-inPosterior(post, [θ1, θ2])                 # Bool, using post.acceptance_tol
-inPosterior(post, queries; tol = 0.05)      # batch + tol override; queries is [N × n_cm_params]
+posteriorScore(post, [θ1, θ2])                    # score ∈ [0,1] at one interior point
+inPosterior(post, [θ1, θ2])                       # Bool, using post.min_score
+inPosterior(post, queries; min_score = 0.05)      # batch + threshold override; queries is [N × n_cm_params]
 ```
 
 Interior queries require a `GridCMSample` layout and `bridge ∈ (:box_overlap, :data_trace_in_box)`; `:symmetric_trace` and scattered layouts raise a clear `ArgumentError`. The interpolator is selected via the `interp` kwarg on `buildPosterior` (default `LinearCIInterp()`).
@@ -110,6 +111,6 @@ Interior queries require a `GridCMSample` layout and `bridge ∈ (:box_overlap, 
   single-param-set `CMData`; CM parameter locations use the shared `AbstractCMSample` types.
   Dispatches on either `(sm, data, …)` or an `SMFitProblem` already in hand.
 - [x] Interior CM-point queries — `inPosterior(post, θ_cm)` and `posteriorScore(post, θ_cm)`
-  (with batch + `tol` override). Interpolates the per-cm_param_set SM-parameter CI bounds across
+  (with batch + `min_score` override). Interpolates the per-cm_param_set SM-parameter CI bounds across
   the CM grid via `LinearCIInterp` and evaluates the chosen bridge against the data profile.
   `GridCMSample` + `:box_overlap` / `:data_trace_in_box` only; other configurations error.
