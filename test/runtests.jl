@@ -10,7 +10,7 @@ _logistic(t, p, _c) = reshape(
 )
 
 @testset "buildPosterior" begin
-    sm       = AnalyticalSurrogateModel(fn = _logistic)
+    sm       = CustomSurrogateModel(fn = _logistic)
     t        = collect(0.0:5.0:50.0)                      # saturates → r and K identifiable
     sm_prior = ParameterPrior([0.01, 0.5], [2.0, 10.0]; names = ["r", "K"])
     P0       = [0.5 5.0]
