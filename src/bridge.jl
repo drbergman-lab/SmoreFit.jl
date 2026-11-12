@@ -48,7 +48,8 @@ function _fractionInBox(trace::AbstractMatrix, lo, hi)
     return cnt / n
 end
 
-# Relative overlap volume of two boxes, normalized by the data box's width per dimension.
+# Overlap volume of two boxes divided by the data box's volume (per dimension: overlap width ÷
+# data width). Not symmetric: a CM box containing the data box scores 1.0 however large it is.
 # A degenerate data dimension (`width == 0`) is treated as a point: it contributes factor 1
 # when the CM box contains it and short-circuits to 0 otherwise. Non-degenerate disjoint
 # dimensions also short-circuit to 0.
@@ -70,18 +71,86 @@ function _boxOverlapScore(cm_lo, cm_hi, d_lo, d_hi)
     return score
 end
 
+# Jaccard index of two boxes: overlap volume ÷ union volume, with volumes taken as products of
+# widths in the SM parameters' native coordinates. Symmetric, in [0, 1], and 1 only for
+# identical boxes of positive volume. A zero-width dimension in either box makes the overlap
+# volume zero, so the score is 0 — including when both boxes are zero-width at the same point
+# (0 ÷ 0 is taken as 0, never `NaN`). `buildPosterior` warns when a profile produces a
+# zero-width CI.
+#
+# Computed as 1 / (V_cm/V_∩ + V_data/V_∩ - 1) rather than V_∩ / V_∪: each volume ratio is a
+# product of per-dimension width ratios ≥ 1, so no product of raw widths can underflow or
+# overflow. Identical boxes score exactly 1 at any width and dimension, and a ratio that
+# overflows to `Inf` gives 0, never `NaN`.
+function _boxJaccardScore(cm_lo, cm_hi, d_lo, d_hi)
+    cm_ratio = 1.0   # V_cm ÷ V_∩
+    d_ratio  = 1.0   # V_data ÷ V_∩
+    for j in eachindex(cm_lo)
+        overlap = min(cm_hi[j], d_hi[j]) - max(cm_lo[j], d_lo[j])
+        overlap <= 0 && return 0.0
+        cm_ratio *= (cm_hi[j] - cm_lo[j]) / overlap
+        d_ratio  *= (d_hi[j] - d_lo[j]) / overlap
+    end
+    return 1 / (cm_ratio + d_ratio - 1)
+end
+
+# SM-parameter indices whose box (CI, with the swept-edge fallback) has zero width.
+_zeroWidthParams(plr::ProfileLikelihoodResult) = let (lo, hi) = _profileBox(plr)
+    findall(lo .== hi)
+end
+
+# Warn once per `buildPosterior` call if any profile — the data's or a CM param_set's — produced a
+# zero-width CI. Such a box has zero volume, so the Jaccard score against it is 0.
+function _warnZeroWidthCIs(data_plr::ProfileLikelihoodResult, uq_results)
+    msgs = String[]
+    param_names(plr) = [pc.parameter_name for pc in plr.profiles]
+    d = _zeroWidthParams(data_plr)
+    isempty(d) || push!(msgs, "data profile: $(param_names(data_plr)[d])")
+    for (i, uq) in enumerate(uq_results)
+        z = _zeroWidthParams(uq)
+        isempty(z) || push!(msgs, "cm_param_set $i: $(param_names(uq)[z])")
+    end
+    isempty(msgs) && return nothing
+    @warn "`buildPosterior`: zero-width profile-likelihood CI (ci_lower == ci_upper) for " *
+          join(msgs, "; ") * ". A zero-width box has zero volume, so its `:box_overlap` " *
+          "Jaccard score is 0. Check the profile resolution and range for these parameters."
+    return nothing
+end
+
+_boxScoreError(box_score) = ArgumentError(
+    "unknown box_score :$box_score; expected :jaccard or :data_normalized"
+)
+
+function _validateBoxScore(box_score::Symbol)
+    box_score in (:jaccard, :data_normalized) || throw(_boxScoreError(box_score))
+    return box_score
+end
+
+# Score of the `:box_overlap` bridge under the chosen `box_score`.
+function _boxScore(cm_lo, cm_hi, d_lo, d_hi, box_score::Symbol)
+    if box_score === :jaccard
+        return _boxJaccardScore(cm_lo, cm_hi, d_lo, d_hi)
+    elseif box_score === :data_normalized
+        return _boxOverlapScore(cm_lo, cm_hi, d_lo, d_hi)
+    else
+        throw(_boxScoreError(box_score))
+    end
+end
+
 # Consistency score in [0, 1] given a CM-side box only (no CM-side trace). Box-based bridges
 # work directly; trace-based ones cannot — used by interior queries where the CM-side box is
-# interpolated across CM space but there is no per-point CM trace to interpolate.
+# interpolated across CM space but there is no per-point CM trace to interpolate. `box_score`
+# only affects `:box_overlap`.
 function _consistencyBox(
     cm_lo::AbstractVector,
     cm_hi::AbstractVector,
     data_plr::ProfileLikelihoodResult,
     bridge::Symbol,
+    box_score::Symbol,
 )
     if bridge === :box_overlap
         d_lo, d_hi = _profileBox(data_plr)
-        return _boxOverlapScore(cm_lo, cm_hi, d_lo, d_hi)
+        return _boxScore(cm_lo, cm_hi, d_lo, d_hi, box_score)
     elseif bridge === :data_trace_in_box
         return _fractionInBox(_profileTrace(data_plr), cm_lo, cm_hi)
     elseif bridge === :symmetric_trace
@@ -96,7 +165,12 @@ function _consistencyBox(
 end
 
 # Consistency score in [0, 1] between a CM param_set's profiles and the data's profiles.
-function _consistency(cm_plr::ProfileLikelihoodResult, data_plr::ProfileLikelihoodResult, bridge::Symbol)
+function _consistency(
+    cm_plr::ProfileLikelihoodResult,
+    data_plr::ProfileLikelihoodResult,
+    bridge::Symbol,
+    box_score::Symbol,
+)
     cm_lo, cm_hi = _profileBox(cm_plr)
     if bridge === :symmetric_trace
         d_lo, d_hi = _profileBox(data_plr)
@@ -105,6 +179,6 @@ function _consistency(cm_plr::ProfileLikelihoodResult, data_plr::ProfileLikeliho
             _fractionInBox(_profileTrace(cm_plr),   d_lo, d_hi),
         )
     else
-        return _consistencyBox(cm_lo, cm_hi, data_plr, bridge)
+        return _consistencyBox(cm_lo, cm_hi, data_plr, bridge, box_score)
     end
 end
