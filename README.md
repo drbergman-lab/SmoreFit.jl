@@ -51,11 +51,29 @@ The `problem` form uses `problem.loss`; the `(sm, data, …)` form takes a `loss
 
 | Bridge | Score |
 |---|---|
-| `:box_overlap` *(default)* | Relative overlap volume of the two hyper-rectangles (per-parameter marginal χ²(1) CIs). Symmetric. |
+| `:box_overlap` *(default)* | Overlap of the two hyper-rectangles (per-parameter marginal χ²(1) CIs), scored per `box_score` (below). |
 | `:data_trace_in_box` | Fraction of data profile trace points (in-CI portion) that lie inside the CM box. |
 | `:symmetric_trace` | Max of the two-way trace-in-box fractions. |
 
 A `nothing` CI bound (unidentified on that side) falls back to the profile's swept-range extreme — *not* ±Inf — so the prior still bounds the region.
+
+#### Box score
+
+`box_score::Symbol` selects how `:box_overlap` scores the overlap (the trace bridges ignore it). Volumes are products of widths in the SM parameters' native coordinates.
+
+| `box_score` | Score |
+|---|---|
+| `:jaccard` | Overlap volume ÷ volume of the union of the two boxes (Jaccard index). Symmetric; 1 only for identical boxes. |
+| `:data_normalized` | Overlap volume ÷ data-box volume. Not symmetric: a CM box containing the data box scores 1 however large it is. |
+
+The default is `:data_normalized`, and using it logs a one-time warning: **in SmoreFit v0.6 the default becomes `:jaccard`.** The data-normalized score rewards width — an open CI stretched to the swept-range edge contains the data box and scores 1 — while Jaccard penalizes it. Pass `box_score` explicitly to choose a score and silence the warning:
+
+```julia
+post = buildPosterior(sm, data, uq_results, cm_params; box_score = :jaccard)          # adopt the v0.6 default now
+post = buildPosterior(sm, data, uq_results, cm_params; box_score = :data_normalized)  # keep the v0.5.0 score
+```
+
+The chosen score is stored on the result (`post.box_score`) and reused by interior queries.
 
 ### Posterior representation
 
@@ -106,7 +124,8 @@ Interior queries require a `GridCMSample` layout and `bridge ∈ (:box_overlap, 
 - [x] `buildPosterior` — posterior on CM parameter space given real-world data + SM UQ from
   SmoreBase. Profiles the SM against the data, then bridges those profiles against the
   per-cm_param_set CM profiles via one of three selectable methods (`:box_overlap`,
-  `:data_trace_in_box`, `:symmetric_trace`). Returns a grid-aware `CMPosteriorResult`
+  `:data_trace_in_box`, `:symmetric_trace`), with `:box_overlap` scored as Jaccard or
+  data-normalized via `box_score`. Returns a grid-aware `CMPosteriorResult`
   (`posteriorSamples`, `posteriorWeights`, `acceptedGrid`, `scoreGrid`). Real data is a
   single-param-set `CMData`; CM parameter locations use the shared `AbstractCMSample` types.
   Dispatches on either `(sm, data, …)` or an `SMFitProblem` already in hand.

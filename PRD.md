@@ -39,12 +39,26 @@ The SM fitting step (SmoreBase) produces SM parameters and their uncertainty for
     needed here just for labels). On the raw-matrix form, defaults to `nothing` and threads
     through to `CMSample(cm_params; names = cm_names)`.
   - `bridge::Symbol = :box_overlap` — overlap test between the two SM-parameter confidence
-    regions: `:box_overlap` (symmetric box-vs-box), `:data_trace_in_box` (data profile trace
-    points inside the CM box), `:symmetric_trace`
+    regions: `:box_overlap` (box-vs-box overlap volume, scored per `box_score`),
+    `:data_trace_in_box` (data profile trace points inside the CM box), `:symmetric_trace`
+  - `box_score::Union{Nothing,Symbol} = nothing` — score for `:box_overlap`; ignored (not an
+    error) for the trace bridges. Volumes are products of widths in native SM-parameter
+    coordinates; disjoint in any dimension → 0.
+    - `:jaccard` — overlap volume ÷ union volume. In [0, 1], symmetric, 1 only for identical
+      boxes. Degenerate (zero-width) data dimensions keep the data-normalized containment test
+      (contained → dimension dropped, else 0) and the index is computed over the remaining
+      dimensions; all dimensions degenerate and contained → 1. A zero-width CM dimension against
+      a non-degenerate data dimension → 0. Never `NaN`.
+    - `:data_normalized` — overlap volume ÷ data-box volume (the v0.5.0 score).
+    - Unset (`nothing`) → `:data_normalized`; with `bridge = :box_overlap` it logs a one-time
+      `@warn` (`maxlog = 1`) that the default becomes `:jaccard` in v0.6. No warning when
+      `box_score` is explicit or the bridge is a trace bridge.
+    - Any other symbol → `ArgumentError` naming the two valid values.
   - `profile_options::ProfileLikelihood`, `p0`, `loss`, `min_score`, `interp`
 - Output: `CMPosteriorResult` — stores `accepted` and `scores` per cm_param_set plus the
   `cm_sample` (grid-aware), `cm_names`, the CM param_sets' `uq_results`, derived `lb_table`/`ub_table`,
-  and a prebuilt bounds interpolator. Accessors: `posteriorSamples` (hard accept/reject set) and
+  a prebuilt bounds interpolator, and the resolved `box_score` (interior queries reuse it). The
+  11-argument positional constructor without `box_score` is kept and sets `:data_normalized`. Accessors: `posteriorSamples` (hard accept/reject set) and
   `posteriorWeights` (normalized scores, a graded posterior), `acceptedGrid`, `scoreGrid` — which
   view of the posterior to use is a choice made at read time via these accessors, not a stored mode.
 - **Breaking change from earlier versions:** `cm_prior::ParameterPrior` is no longer a
@@ -81,7 +95,10 @@ degrade to `nothing`), and the six-way `acceptance_method` sprawl (three clean b
 highest under all three bridge methods; cm_param_sets with disjoint SM regions are rejected;
 graded scores decrease away from the best match. `cm_names` defaults to `cm_sample.names`
 (auto-generated `"cm_1", ...` when built from a raw matrix without names attached) and can be
-overridden explicitly. Covered in `test/runtests.jl`.
+overridden explicitly. `box_score = :jaccard` is symmetric and scores a wide CM box containing
+the data box below 1 (data-normalized: exactly 1); both scores accept the same cm_param_sets at
+`min_score = 0`; interior queries at a cm_param_set reproduce its stored score under either.
+Covered in `test/runtests.jl`.
 
 **Future directions (not implemented):**
 - Profile smoothing/refinement before bridging.

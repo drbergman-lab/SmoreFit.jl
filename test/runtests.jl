@@ -21,9 +21,9 @@ _logistic(t, p, _c) = reshape(
     rtrue(c) = 0.35 + 0.05 * c                            # r ∈ {0.40, …, 0.60}
     Ktrue    = 4.0
 
-    function _profileAt(c)
+    function _profileAt(c; σ = noise)
         μ    = _logistic(t, [rtrue(c), Ktrue], nothing)
-        d    = CMData(μ = vec(μ), σ = noise .* ones(length(t)), times = t)
+        d    = CMData(μ = vec(μ), σ = σ .* ones(length(t)), times = t)
         prob = SMFitProblem(sm, d, sm_prior)
         fit  = fitSurrogate(prob, P0)
         return quantifyUncertainty(ProfileLikelihood(n_points = 12), prob, fit, 1)
@@ -228,6 +228,136 @@ _logistic(t, p, _c) = reshape(
         @test SmoreFit._boxOverlapScore([0.0, 0.0], [1.0, 1.0], [0.5, 0.3], [0.5, 0.3]) ≈ 1.0
     end
 
+    @testset "box scores" begin
+        J  = SmoreFit._boxJaccardScore
+        DN = SmoreFit._boxOverlapScore
+
+        @testset "Jaccard: hand-computed values" begin
+            # 1-D
+            @test J([0.0], [2.0], [1.0], [3.0]) ≈ 1 / 3     # partial: overlap 1, union 3
+            @test J([0.0], [4.0], [1.0], [2.0]) ≈ 1 / 4     # CM box contains data box: smaller ÷ larger
+            @test J([1.0], [2.0], [0.0], [4.0]) ≈ 1 / 4     # data box contains CM box
+            @test J([0.0], [1.0], [0.0], [1.0]) == 1.0      # identical
+            @test J([0.0], [1.0], [2.0], [3.0]) == 0.0      # disjoint
+            @test J([0.0], [1.0], [1.0], [2.0]) == 0.0      # touching: zero-measure overlap
+
+            # 2-D
+            @test J([0.0, 0.0], [2.0, 2.0], [1.0, 1.0], [3.0, 3.0]) ≈ 1 / 7    # overlap 1, union 4 + 4 - 1
+            @test J([0.0, 0.0], [4.0, 4.0], [1.0, 1.0], [2.0, 3.0]) ≈ 2 / 16   # containment: 2 ÷ 16
+            @test J([0.0, 1.0], [2.0, 3.0], [0.0, 1.0], [2.0, 3.0]) == 1.0     # identical
+            @test J([0.0, 0.0], [1.0, 1.0], [0.0, 2.0], [1.0, 3.0]) == 0.0     # disjoint in dim 2 only
+        end
+
+        @testset "Jaccard is symmetric; data-normalized is not" begin
+            a_lo, a_hi = [0.0, 0.0], [2.0, 1.0]   # volume 2
+            b_lo, b_hi = [1.0, 0.5], [4.0, 2.0]   # volume 4.5; overlap [1, 2] × [0.5, 1] = 0.5
+            @test J(a_lo, a_hi, b_lo, b_hi) ≈ 0.5 / (2 + 4.5 - 0.5)
+            @test J(a_lo, a_hi, b_lo, b_hi) == J(b_lo, b_hi, a_lo, a_hi)
+            @test DN(a_lo, a_hi, b_lo, b_hi) ≈ 0.5 / 4.5
+            @test DN(b_lo, b_hi, a_lo, a_hi) ≈ 0.5 / 2
+        end
+
+        @testset "open CI: wide CM box containing the data box" begin
+            # An open profile CI stretches the CM box to the swept-range edge. The data-normalized
+            # score gives such a box the maximum score however wide it is; Jaccard penalizes it.
+            cm_lo, cm_hi = [0.0, 0.0], [10.0, 10.0]
+            d_lo,  d_hi  = [0.9, 1.9], [1.1, 2.1]
+            @test DN(cm_lo, cm_hi, d_lo, d_hi) == 1.0
+            @test J(cm_lo, cm_hi, d_lo, d_hi) ≈ 0.04 / 100
+        end
+
+        @testset "Jaccard: degenerate dimensions" begin
+            # The `_boxOverlapScore` regression cases, plus zero-width CM dimensions. A degenerate
+            # data dimension is a point: contained → dropped from the Jaccard index; not contained
+            # → 0. Every dimension degenerate and contained → 1.0.
+            cases = [
+                # (cm_lo, cm_hi, d_lo, d_hi) => expected
+                ([0.0, 0.0], [1.0, 0.7], [0.5, 0.0], [0.5, 0.7]) => 1.0,   # dim 2 identical
+                ([0.6, 0.0], [1.0, 1.0], [0.5, 0.5], [0.5, 0.7]) => 0.0,   # point outside CM box
+                ([0.5, 0.0], [1.0, 1.0], [0.5, 0.5], [0.5, 0.7]) => 0.2,   # boundary contains; dim 2: 0.2 ÷ 1
+                ([0.0, 0.8], [1.0, 1.0], [0.5, 0.0], [0.5, 0.7]) => 0.0,   # disjoint non-degenerate dim
+                ([0.0, 0.0], [1.0, 1.0], [0.5, 0.3], [0.5, 0.3]) => 1.0,   # all degenerate, contained
+                ([0.5, 0.0], [0.5, 1.0], [0.0, 0.0], [1.0, 1.0]) => 0.0,   # zero-width CM dim vs data width 1
+                ([0.5, 0.0], [0.5, 1.0], [0.5, 0.0], [0.5, 1.0]) => 1.0,   # both degenerate at the same point
+            ]
+            for (box, expected) in cases
+                s = J(box...)
+                @test !isnan(s)
+                @test s ≈ expected
+            end
+        end
+
+        @testset "invalid box_score" begin
+            @test_throws ArgumentError SmoreFit._boxScore([0.0], [1.0], [0.0], [1.0], :union)
+        end
+    end
+
+    @testset "buildPosterior box_score" begin
+        post_dn = buildPosterior(sm, data, uq_results, cm_params; box_score = :data_normalized)
+        post_j  = buildPosterior(sm, data, uq_results, cm_params; box_score = :jaccard)
+        @test post_dn.box_score == :data_normalized
+        @test post_j.box_score  == :jaccard
+
+        # Every CM box here lies inside the data box (the CM-side profiles are tighter), and then
+        # union = data box, so the two scores coincide.
+        @test post_j.scores ≈ post_dn.scores
+        @test post_j.accepted == post_dn.accepted
+
+        # A CM box containing the data box separates them: noisier CM output at c = 3 widens its
+        # SM region past the data's. Data-normalized gives it 1.0; Jaccard gives data-box volume
+        # ÷ CM-box volume.
+        uq_wide    = copy(uq_results)
+        uq_wide[3] = _profileAt(3.0; σ = 5noise)
+        wide_dn = buildPosterior(sm, data, uq_wide, cm_params; box_score = :data_normalized)
+        wide_j  = buildPosterior(sm, data, uq_wide, cm_params; box_score = :jaccard)
+        cm_lo, cm_hi = SmoreFit._profileBox(uq_wide[3])
+        d_lo,  d_hi  = SmoreFit._profileBox(wide_j.data_profiles)
+        @test all(cm_lo .<= d_lo) && all(d_hi .<= cm_hi)   # confirm the setup: containment
+        @test wide_dn.scores[3] ≈ 1.0
+        @test wide_j.scores[3]  ≈ prod(d_hi .- d_lo) / prod(cm_hi .- cm_lo)
+        @test wide_j.scores[3]  < 0.1
+
+        # Overlap > 0 under either score, so acceptance at min_score = 0 is the same.
+        @test wide_j.accepted == wide_dn.accepted
+        @test iszero.(wide_j.scores) == iszero.(wide_dn.scores)
+
+        # Interior queries reuse the stored box_score, reproducing the stored scores.
+        for post in (post_dn, post_j, wide_dn, wide_j), i in 1:5
+            @test posteriorScore(post, [cvals[i]]) ≈ post.scores[i]
+        end
+
+        # Ignored by the trace bridges, without error.
+        for bridge in (:data_trace_in_box, :symmetric_trace)
+            a = buildPosterior(sm, data, uq_results, cm_params; bridge = bridge, box_score = :jaccard)
+            b = buildPosterior(sm, data, uq_results, cm_params; bridge = bridge, box_score = :data_normalized)
+            @test a.scores == b.scores
+        end
+
+        # Positional constructor without box_score (the v0.5.0 field list) still works.
+        legacy = CMPosteriorResult(
+            post_dn.cm_sample, post_dn.cm_names, post_dn.accepted, post_dn.scores, post_dn.bridge,
+            post_dn.min_score, post_dn.data_profiles, post_dn.uq_results, post_dn.lb_table,
+            post_dn.ub_table, post_dn.get_bounds,
+        )
+        @test legacy.box_score == :data_normalized
+        @test posteriorScore(legacy, [cvals[3]]) ≈ post_dn.scores[3]
+    end
+
+    @testset "box_score default (v0.5.1): data-normalized, with a warning" begin
+        warn = Base.CoreLogging.Warn
+        post_default = @test_logs (:warn, r"Jaccard") min_level = warn buildPosterior(sm, data, uq_results, cm_params)
+        post_dn      = buildPosterior(sm, data, uq_results, cm_params; box_score = :data_normalized)
+        @test post_default.box_score == :data_normalized
+        @test post_default.scores   == post_dn.scores
+        @test post_default.accepted == post_dn.accepted
+
+        # No warning when box_score is explicit, nor for the trace bridges.
+        @test_logs min_level = warn buildPosterior(sm, data, uq_results, cm_params; box_score = :jaccard)
+        @test_logs min_level = warn buildPosterior(sm, data, uq_results, cm_params; box_score = :data_normalized)
+        @test_logs min_level = warn buildPosterior(sm, data, uq_results, cm_params; bridge = :data_trace_in_box)
+        @test_logs min_level = warn buildPosterior(sm, data, uq_results, cm_params; bridge = :symmetric_trace)
+    end
+
     @testset "validation" begin
         # data must have a single param set
         bad = CMData(μ = rand(length(t), 2), σ = ones(length(t), 2), times = t, cm_param_sets = 2)
@@ -238,5 +368,9 @@ _logistic(t, p, _c) = reshape(
 
         # unknown bridge method
         @test_throws ArgumentError buildPosterior(sm, data, uq_results, cm_params; bridge = :nope)
+
+        # unknown box_score, with any bridge
+        @test_throws ArgumentError buildPosterior(sm, data, uq_results, cm_params; box_score = :union)
+        @test_throws ArgumentError buildPosterior(sm, data, uq_results, cm_params; bridge = :data_trace_in_box, box_score = :union)
     end
 end

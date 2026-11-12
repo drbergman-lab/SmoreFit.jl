@@ -48,7 +48,8 @@ function _fractionInBox(trace::AbstractMatrix, lo, hi)
     return cnt / n
 end
 
-# Relative overlap volume of two boxes, normalized by the data box's width per dimension.
+# Overlap volume of two boxes divided by the data box's volume (per dimension: overlap width ÷
+# data width). Not symmetric: a CM box containing the data box scores 1.0 however large it is.
 # A degenerate data dimension (`width == 0`) is treated as a point: it contributes factor 1
 # when the CM box contains it and short-circuits to 0 otherwise. Non-degenerate disjoint
 # dimensions also short-circuit to 0.
@@ -70,18 +71,68 @@ function _boxOverlapScore(cm_lo, cm_hi, d_lo, d_hi)
     return score
 end
 
+# Jaccard index of two boxes: overlap volume ÷ union volume, with volumes taken as products of
+# widths in the SM parameters' native coordinates. Symmetric in the two boxes for
+# non-degenerate dimensions, and 1 only for identical boxes. Degenerate data dimensions get the
+# same containment test as `_boxOverlapScore` (contained → dimension dropped, otherwise 0); the
+# Jaccard index is then computed over the remaining dimensions, and is 1.0 if none remain. A
+# zero-width CM dimension against a non-degenerate data dimension has zero-measure overlap → 0.
+function _boxJaccardScore(cm_lo, cm_hi, d_lo, d_hi)
+    overlap_vol = 1.0
+    cm_vol      = 1.0
+    d_vol       = 1.0
+    n_kept      = 0
+    for j in eachindex(cm_lo)
+        d_width = d_hi[j] - d_lo[j]
+        if d_width == 0
+            (cm_lo[j] <= d_lo[j] <= cm_hi[j]) || return 0.0
+            continue
+        end
+        overlap = min(cm_hi[j], d_hi[j]) - max(cm_lo[j], d_lo[j])
+        overlap <= 0 && return 0.0
+        overlap_vol *= overlap
+        cm_vol      *= cm_hi[j] - cm_lo[j]
+        d_vol       *= d_width
+        n_kept      += 1
+    end
+    n_kept == 0 && return 1.0
+    return overlap_vol / (cm_vol + d_vol - overlap_vol)
+end
+
+_boxScoreError(box_score) = ArgumentError(
+    "unknown box_score :$box_score; expected :jaccard or :data_normalized"
+)
+
+function _validateBoxScore(box_score::Symbol)
+    box_score in (:jaccard, :data_normalized) || throw(_boxScoreError(box_score))
+    return box_score
+end
+
+# Score of the `:box_overlap` bridge under the chosen `box_score`.
+function _boxScore(cm_lo, cm_hi, d_lo, d_hi, box_score::Symbol)
+    if box_score === :jaccard
+        return _boxJaccardScore(cm_lo, cm_hi, d_lo, d_hi)
+    elseif box_score === :data_normalized
+        return _boxOverlapScore(cm_lo, cm_hi, d_lo, d_hi)
+    else
+        throw(_boxScoreError(box_score))
+    end
+end
+
 # Consistency score in [0, 1] given a CM-side box only (no CM-side trace). Box-based bridges
 # work directly; trace-based ones cannot — used by interior queries where the CM-side box is
-# interpolated across CM space but there is no per-point CM trace to interpolate.
+# interpolated across CM space but there is no per-point CM trace to interpolate. `box_score`
+# only affects `:box_overlap`.
 function _consistencyBox(
     cm_lo::AbstractVector,
     cm_hi::AbstractVector,
     data_plr::ProfileLikelihoodResult,
     bridge::Symbol,
+    box_score::Symbol,
 )
     if bridge === :box_overlap
         d_lo, d_hi = _profileBox(data_plr)
-        return _boxOverlapScore(cm_lo, cm_hi, d_lo, d_hi)
+        return _boxScore(cm_lo, cm_hi, d_lo, d_hi, box_score)
     elseif bridge === :data_trace_in_box
         return _fractionInBox(_profileTrace(data_plr), cm_lo, cm_hi)
     elseif bridge === :symmetric_trace
@@ -96,7 +147,12 @@ function _consistencyBox(
 end
 
 # Consistency score in [0, 1] between a CM param_set's profiles and the data's profiles.
-function _consistency(cm_plr::ProfileLikelihoodResult, data_plr::ProfileLikelihoodResult, bridge::Symbol)
+function _consistency(
+    cm_plr::ProfileLikelihoodResult,
+    data_plr::ProfileLikelihoodResult,
+    bridge::Symbol,
+    box_score::Symbol,
+)
     cm_lo, cm_hi = _profileBox(cm_plr)
     if bridge === :symmetric_trace
         d_lo, d_hi = _profileBox(data_plr)
@@ -105,6 +161,6 @@ function _consistency(cm_plr::ProfileLikelihoodResult, data_plr::ProfileLikeliho
             _fractionInBox(_profileTrace(cm_plr),   d_lo, d_hi),
         )
     else
-        return _consistencyBox(cm_lo, cm_hi, data_plr, bridge)
+        return _consistencyBox(cm_lo, cm_hi, data_plr, bridge, box_score)
     end
 end

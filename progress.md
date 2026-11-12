@@ -179,3 +179,42 @@ backwards from what "tolerance" implies.
 ### Status
 Implemented on `feature/drop-posterior-field-rename-min-score`. Full test suite green (82
 tests, one fewer than before since the dead `posterior`-validation test was removed).
+
+---
+
+## Session: Jaccard box score, opt-in for v0.5.1 (2026-11-12)
+
+### Goal
+`_boxOverlapScore` divides the overlap volume by the **data box's** volume. The docs called it
+symmetric; it is not, and a CM box that contains the data box scores 1.0 however large it is.
+Open profile CIs make that common: `_profileBox` stretches an open side to the swept-range edge,
+so a non-identifiable CM param_set gets the maximum score. In the bridge-paper Tier 1 study
+(SmorePaper, `analysis/tier1_round/notes.md`) all 27 open-CI false accepts scored 1.0; as
+Jaccard they score ≤ 0.006, and the bridge's rank agreement with both ground truths goes from
+negative to 0.74–0.93.
+
+### Decision
+- Score `:box_overlap` as the **Jaccard index** (overlap ÷ union). A choice of score for the
+  existing bridge, not a new bridge: new `box_score` keyword (`:jaccard` / `:data_normalized`).
+- Two releases (Daniel's call). **v0.5.1:** opt-in; unset → `:data_normalized` plus a one-time
+  `@warn` (`maxlog = 1`, visible by default — `Base.depwarn` is hidden by default). **v0.6.0:**
+  default `:jaccard`, warning removed, `:data_normalized` stays available.
+- `box_score` is stored on `CMPosteriorResult` and threaded through `_consistency` /
+  `_consistencyBox` as an argument, so interior queries reproduce stored scores. The 11-argument
+  positional constructor is kept (defaults `:data_normalized`) so direct construction does not
+  break in a patch release.
+- Degenerate data dimensions keep the existing containment test; Jaccard is computed over the
+  remaining dimensions (1.0 if none remain). Consequence: the symmetry / "1 only for identical
+  boxes" properties hold for non-degenerate boxes only — a degenerate data dimension contained by
+  a wide CM dimension is dropped rather than penalized.
+- `_boxOverlapScore` is unchanged byte-for-byte; `_boxJaccardScore` sits beside it.
+
+### Testing note
+In the existing test fixture every CM box lies *inside* the data box (the data profile is wider
+than the CM-side ones), where union = data box and the two scores coincide. The end-to-end test
+therefore adds a CM param_set with 5× CM noise, whose box contains the data box: data-normalized
+1.0, Jaccard ≈ 0.03.
+
+### Out of scope (separate candidate changes)
+The open-CI rule itself, the trace bridges' scores, profile-point spacing, the data-profile
+defaults, prior-weighted or log-coordinate volume.
