@@ -41,16 +41,14 @@ The SM fitting step (SmoreBase) produces SM parameters and their uncertainty for
   - `bridge::Symbol = :box_overlap` — overlap test between the two SM-parameter confidence
     regions: `:box_overlap` (box-vs-box overlap volume, scored per `box_score`),
     `:data_trace_in_box` (data profile trace points inside the CM box), `:symmetric_trace`
-  - `box_score::Union{Nothing,Symbol} = nothing` — score for `:box_overlap`; ignored (not an
+  - `box_score::Symbol = :jaccard` — score for `:box_overlap`; ignored (not an
     error) for the trace bridges. Volumes are products of widths in native SM-parameter
     coordinates; disjoint in any dimension → 0.
     - `:jaccard` — overlap volume ÷ union volume. In [0, 1], symmetric, 1 only for identical
       boxes of positive volume. A zero-width dimension in either box means zero overlap volume
       → 0, including when both boxes are zero-width at the same point (0 ÷ 0 → 0). Never `NaN`.
-    - `:data_normalized` — overlap volume ÷ data-box volume (the v0.5.0 score).
-    - Unset (`nothing`) → `:data_normalized`; with `bridge = :box_overlap` it logs a one-time
-      `@warn` (`maxlog = 1`) that the default becomes `:jaccard` in v0.6. No warning when
-      `box_score` is explicit or the bridge is a trace bridge.
+    - `:data_normalized` — overlap volume ÷ data-box volume (the default through v0.5.x; v0.5.1
+      warned that the default would change).
     - Any other symbol → `ArgumentError` naming the two valid values.
   - Any zero-width profile CI (`ci_lower == ci_upper`), in the data profile or a CM param_set's,
     logs one `@warn` per `buildPosterior` call naming the profiles and parameters, whatever the

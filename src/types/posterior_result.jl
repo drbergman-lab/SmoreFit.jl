@@ -29,9 +29,9 @@ among the cm_param_sets) can be queried via [`inPosterior`](@ref) and [`posterio
   matching the `:box_overlap` bridge)
 - `get_bounds` — closure `θ_cm -> (lb, ub)` interpolating the CI tables across the CM grid;
   `nothing` for non-grid layouts
-- `box_score` — how the `:box_overlap` bridge scores box overlap, as resolved by
-  `buildPosterior`: `:jaccard` (overlap volume ÷ union volume) or `:data_normalized` (overlap
-  volume ÷ data-box volume). Interior queries reuse it, so they reproduce the stored `scores`.
+- `box_score` — how the `:box_overlap` bridge scores box overlap, as passed to
+  `buildPosterior`: `:jaccard` (overlap volume ÷ union volume; the default) or
+  `:data_normalized` (overlap volume ÷ data-box volume). Interior queries reuse it, so they reproduce the stored `scores`.
   Recorded for every bridge but only consulted by `:box_overlap`. The 11-argument positional
   constructor (without this field) is kept and sets it to `:data_normalized`, the v0.5.0 score.
 

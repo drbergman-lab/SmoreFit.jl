@@ -182,7 +182,7 @@ tests, one fewer than before since the dead `posterior`-validation test was remo
 
 ---
 
-## Session: Jaccard box score, opt-in for v0.5.1 (2026-11-12)
+## Session: Jaccard box score — opt-in in v0.5.1, default in v0.6.0 (2026-11-12)
 
 ### Goal
 `_boxOverlapScore` divides the overlap volume by the **data box's** volume. The docs called it
@@ -211,6 +211,9 @@ negative to 0.74–0.93.
   from a degenerate profile (e.g. −Inf log-likelihood beside the MLE, or a zero-width sweep), so
   `buildPosterior` now warns whenever one appears.
 - `_boxOverlapScore` is unchanged byte-for-byte; `_boxJaccardScore` sits beside it.
+- v0.6.0 drops the `nothing` sentinel and the warning. The 11-argument positional constructor
+  stays, still defaulting to `:data_normalized`: a result assembled from the pre-0.5.1 field
+  list carries data-normalized scores, so that keeps its interior queries consistent.
 
 ### Testing note
 In the existing test fixture every CM box lies *inside* the data box (the data profile is wider
