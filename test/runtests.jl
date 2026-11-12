@@ -266,6 +266,17 @@ _logistic(t, p, _c) = reshape(
             @test J(cm_lo, cm_hi, d_lo, d_hi) ≈ 0.04 / 100
         end
 
+        @testset "Jaccard: no underflow or overflow at extreme scales" begin
+            # Multiplying raw widths underflows (1e-9^40) or overflows (1e9^40) to 0 ÷ 0 = NaN.
+            for w in (1e-9, 1e9)
+                lo, hi = zeros(40), fill(w, 40)
+                @test J(lo, hi, lo, hi) == 1.0                                   # identical
+                @test J(lo, 2 .* hi, hi, 3 .* hi) ≈ 1 / (2 * 2.0^40 - 1)          # half overlap per dim
+            end
+            # A volume ratio that overflows gives 0, not NaN.
+            @test J(zeros(400), fill(10.0, 400), zeros(400), ones(400)) == 0.0
+        end
+
         @testset "Jaccard: degenerate dimensions" begin
             # A zero-width dimension in either box gives a zero-volume overlap → 0, symmetrically,
             # even when both boxes are zero-width at the same point (0 ÷ 0 → 0, never NaN).
