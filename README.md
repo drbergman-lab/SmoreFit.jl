@@ -110,13 +110,12 @@ Interior queries require a `GridCMSample` layout and `bridge ∈ (:box_overlap, 
 ## Background
 
 - [PRD.md](PRD.md) — behavioral spec and acceptance criteria.
-- [progress.md](progress.md) — session-level decisions and the reasoning behind them.
 
 ---
 
 ## Implementation Status
 
-> For Claude Code sessions: this section is the authoritative record of what has been built. Update it as features are completed. See [PRD.md](PRD.md) for behavioral specifications and [progress.md](progress.md) for decision rationale.
+> For Claude Code sessions: this section is the authoritative record of what has been built. Update it as features are completed. See [PRD.md](PRD.md) for behavioral specifications.
 
 ### Complete
 
