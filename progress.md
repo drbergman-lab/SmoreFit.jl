@@ -211,9 +211,10 @@ negative to 0.74–0.93.
   from a degenerate profile (e.g. −Inf log-likelihood beside the MLE, or a zero-width sweep), so
   `buildPosterior` now warns whenever one appears.
 - `_boxOverlapScore` is unchanged byte-for-byte; `_boxJaccardScore` sits beside it.
-- v0.6.0 drops the `nothing` sentinel and the warning. The 11-argument positional constructor
-  stays, still defaulting to `:data_normalized`: a result assembled from the pre-0.5.1 field
-  list carries data-normalized scores, so that keeps its interior queries consistent.
+- v0.6.0 drops the `nothing` sentinel and the warning, and also the 11-argument positional
+  constructor. That constructor was kept in v0.5.1 only so a patch release would not break
+  direct construction. In v0.6 only `buildPosterior` builds a `CMPosteriorResult`, so direct
+  construction is not public API, and v0.6.0 is breaking anyway.
 
 ### Testing note
 In the existing test fixture every CM box lies *inside* the data box (the data profile is wider

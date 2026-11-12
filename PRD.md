@@ -56,8 +56,8 @@ The SM fitting step (SmoreBase) produces SM parameters and their uncertainty for
   - `profile_options::ProfileLikelihood`, `p0`, `loss`, `min_score`, `interp`
 - Output: `CMPosteriorResult` — stores `accepted` and `scores` per cm_param_set plus the
   `cm_sample` (grid-aware), `cm_names`, the CM param_sets' `uq_results`, derived `lb_table`/`ub_table`,
-  a prebuilt bounds interpolator, and the resolved `box_score` (interior queries reuse it). The
-  11-argument positional constructor without `box_score` is kept and sets `:data_normalized`. Accessors: `posteriorSamples` (hard accept/reject set) and
+  a prebuilt bounds interpolator, and the `box_score` used (interior queries reuse it).
+  Accessors: `posteriorSamples` (hard accept/reject set) and
   `posteriorWeights` (normalized scores, a graded posterior), `acceptedGrid`, `scoreGrid` — which
   view of the posterior to use is a choice made at read time via these accessors, not a stored mode.
 - **Breaking change from earlier versions:** `cm_prior::ParameterPrior` is no longer a

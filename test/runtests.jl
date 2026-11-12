@@ -331,15 +331,6 @@ _logistic(t, p, _c) = reshape(
             b = buildPosterior(sm, data, uq_results, cm_params; bridge = bridge, box_score = :data_normalized)
             @test a.scores == b.scores
         end
-
-        # Positional constructor without box_score (the v0.5.0 field list) still works.
-        legacy = CMPosteriorResult(
-            post_dn.cm_sample, post_dn.cm_names, post_dn.accepted, post_dn.scores, post_dn.bridge,
-            post_dn.min_score, post_dn.data_profiles, post_dn.uq_results, post_dn.lb_table,
-            post_dn.ub_table, post_dn.get_bounds,
-        )
-        @test legacy.box_score == :data_normalized
-        @test posteriorScore(legacy, [cvals[3]]) ≈ post_dn.scores[3]
     end
 
     @testset "box_score default (v0.6): Jaccard, no warning" begin
