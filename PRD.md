@@ -45,15 +45,16 @@ The SM fitting step (SmoreBase) produces SM parameters and their uncertainty for
     error) for the trace bridges. Volumes are products of widths in native SM-parameter
     coordinates; disjoint in any dimension → 0.
     - `:jaccard` — overlap volume ÷ union volume. In [0, 1], symmetric, 1 only for identical
-      boxes. Degenerate (zero-width) data dimensions keep the data-normalized containment test
-      (contained → dimension dropped, else 0) and the index is computed over the remaining
-      dimensions; all dimensions degenerate and contained → 1. A zero-width CM dimension against
-      a non-degenerate data dimension → 0. Never `NaN`.
+      boxes of positive volume. A zero-width dimension in either box means zero overlap volume
+      → 0, including when both boxes are zero-width at the same point (0 ÷ 0 → 0). Never `NaN`.
     - `:data_normalized` — overlap volume ÷ data-box volume (the v0.5.0 score).
     - Unset (`nothing`) → `:data_normalized`; with `bridge = :box_overlap` it logs a one-time
       `@warn` (`maxlog = 1`) that the default becomes `:jaccard` in v0.6. No warning when
       `box_score` is explicit or the bridge is a trace bridge.
     - Any other symbol → `ArgumentError` naming the two valid values.
+  - Any zero-width profile CI (`ci_lower == ci_upper`), in the data profile or a CM param_set's,
+    logs one `@warn` per `buildPosterior` call naming the profiles and parameters, whatever the
+    bridge.
   - `profile_options::ProfileLikelihood`, `p0`, `loss`, `min_score`, `interp`
 - Output: `CMPosteriorResult` — stores `accepted` and `scores` per cm_param_set plus the
   `cm_sample` (grid-aware), `cm_names`, the CM param_sets' `uq_results`, derived `lb_table`/`ub_table`,

@@ -267,23 +267,22 @@ _logistic(t, p, _c) = reshape(
         end
 
         @testset "Jaccard: degenerate dimensions" begin
-            # The `_boxOverlapScore` regression cases, plus zero-width CM dimensions. A degenerate
-            # data dimension is a point: contained → dropped from the Jaccard index; not contained
-            # → 0. Every dimension degenerate and contained → 1.0.
+            # A zero-width dimension in either box gives a zero-volume overlap → 0, symmetrically,
+            # even when both boxes are zero-width at the same point (0 ÷ 0 → 0, never NaN).
             cases = [
-                # (cm_lo, cm_hi, d_lo, d_hi) => expected
-                ([0.0, 0.0], [1.0, 0.7], [0.5, 0.0], [0.5, 0.7]) => 1.0,   # dim 2 identical
-                ([0.6, 0.0], [1.0, 1.0], [0.5, 0.5], [0.5, 0.7]) => 0.0,   # point outside CM box
-                ([0.5, 0.0], [1.0, 1.0], [0.5, 0.5], [0.5, 0.7]) => 0.2,   # boundary contains; dim 2: 0.2 ÷ 1
-                ([0.0, 0.8], [1.0, 1.0], [0.5, 0.0], [0.5, 0.7]) => 0.0,   # disjoint non-degenerate dim
-                ([0.0, 0.0], [1.0, 1.0], [0.5, 0.3], [0.5, 0.3]) => 1.0,   # all degenerate, contained
-                ([0.5, 0.0], [0.5, 1.0], [0.0, 0.0], [1.0, 1.0]) => 0.0,   # zero-width CM dim vs data width 1
-                ([0.5, 0.0], [0.5, 1.0], [0.5, 0.0], [0.5, 1.0]) => 1.0,   # both degenerate at the same point
+                # (cm_lo, cm_hi, d_lo, d_hi): the `_boxOverlapScore` regression cases, then
+                # zero-width CM dimensions
+                ([0.0, 0.0], [1.0, 0.7], [0.5, 0.0], [0.5, 0.7]),   # data point inside CM box
+                ([0.6, 0.0], [1.0, 1.0], [0.5, 0.5], [0.5, 0.7]),   # data point outside CM box
+                ([0.5, 0.0], [1.0, 1.0], [0.5, 0.5], [0.5, 0.7]),   # data point on CM boundary
+                ([0.0, 0.8], [1.0, 1.0], [0.5, 0.0], [0.5, 0.7]),   # plus a disjoint dimension
+                ([0.0, 0.0], [1.0, 1.0], [0.5, 0.3], [0.5, 0.3]),   # data box a single point
+                ([0.5, 0.0], [0.5, 1.0], [0.0, 0.0], [1.0, 1.0]),   # zero-width CM dim
+                ([0.5, 0.0], [0.5, 1.0], [0.5, 0.0], [0.5, 1.0]),   # both zero-width at the same point
             ]
-            for (box, expected) in cases
-                s = J(box...)
-                @test !isnan(s)
-                @test s ≈ expected
+            for (cm_lo, cm_hi, d_lo, d_hi) in cases
+                @test J(cm_lo, cm_hi, d_lo, d_hi) === 0.0
+                @test J(d_lo, d_hi, cm_lo, cm_hi) === 0.0
             end
         end
 
@@ -356,6 +355,27 @@ _logistic(t, p, _c) = reshape(
         @test_logs min_level = warn buildPosterior(sm, data, uq_results, cm_params; box_score = :data_normalized)
         @test_logs min_level = warn buildPosterior(sm, data, uq_results, cm_params; bridge = :data_trace_in_box)
         @test_logs min_level = warn buildPosterior(sm, data, uq_results, cm_params; bridge = :symmetric_trace)
+    end
+
+    @testset "zero-width CI warning" begin
+        # Collapse the K profile's CI of cm_param_set 2 to a point.
+        function _collapseK(uq)
+            pcs = map(uq.profiles) do pc
+                pc.parameter_name == "K" || return pc
+                ProfileCurve(pc.parameter_index, pc.parameter_name, pc.profile_values,
+                    pc.log_likelihoods, pc.optimal_parameters, pc.ci_lower, pc.ci_lower,
+                    pc.threshold, pc.reference_ll)
+            end
+            ProfileLikelihoodResult{Float64}(pcs, uq.fit_result, uq.times)
+        end
+        uq_zero    = copy(uq_results)
+        uq_zero[2] = _collapseK(uq_results[2])
+        warn = Base.CoreLogging.Warn
+        post = @test_logs (:warn, r"zero-width.*cm_param_set 2.*K") min_level = warn match_mode = :any buildPosterior(
+            sm, data, uq_zero, cm_params; box_score = :jaccard)
+        @test post.scores[2] == 0.0
+        # No warning when every CI has positive width.
+        @test_logs min_level = warn buildPosterior(sm, data, uq_results, cm_params; box_score = :jaccard)
     end
 
     @testset "validation" begin

@@ -72,31 +72,46 @@ function _boxOverlapScore(cm_lo, cm_hi, d_lo, d_hi)
 end
 
 # Jaccard index of two boxes: overlap volume ÷ union volume, with volumes taken as products of
-# widths in the SM parameters' native coordinates. Symmetric in the two boxes for
-# non-degenerate dimensions, and 1 only for identical boxes. Degenerate data dimensions get the
-# same containment test as `_boxOverlapScore` (contained → dimension dropped, otherwise 0); the
-# Jaccard index is then computed over the remaining dimensions, and is 1.0 if none remain. A
-# zero-width CM dimension against a non-degenerate data dimension has zero-measure overlap → 0.
+# widths in the SM parameters' native coordinates. Symmetric, in [0, 1], and 1 only for
+# identical boxes of positive volume. A zero-width dimension in either box makes the overlap
+# volume zero, so the score is 0 — including when both boxes are zero-width at the same point
+# (0 ÷ 0 is taken as 0, never `NaN`). `buildPosterior` warns when a profile produces a
+# zero-width CI.
 function _boxJaccardScore(cm_lo, cm_hi, d_lo, d_hi)
     overlap_vol = 1.0
     cm_vol      = 1.0
     d_vol       = 1.0
-    n_kept      = 0
     for j in eachindex(cm_lo)
-        d_width = d_hi[j] - d_lo[j]
-        if d_width == 0
-            (cm_lo[j] <= d_lo[j] <= cm_hi[j]) || return 0.0
-            continue
-        end
         overlap = min(cm_hi[j], d_hi[j]) - max(cm_lo[j], d_lo[j])
         overlap <= 0 && return 0.0
         overlap_vol *= overlap
         cm_vol      *= cm_hi[j] - cm_lo[j]
-        d_vol       *= d_width
-        n_kept      += 1
+        d_vol       *= d_hi[j] - d_lo[j]
     end
-    n_kept == 0 && return 1.0
     return overlap_vol / (cm_vol + d_vol - overlap_vol)
+end
+
+# SM-parameter indices whose box (CI, with the swept-edge fallback) has zero width.
+_zeroWidthParams(plr::ProfileLikelihoodResult) = let (lo, hi) = _profileBox(plr)
+    findall(lo .== hi)
+end
+
+# Warn once per `buildPosterior` call if any profile — the data's or a CM param_set's — produced a
+# zero-width CI. Such a box has zero volume, so the Jaccard score against it is 0.
+function _warnZeroWidthCIs(data_plr::ProfileLikelihoodResult, uq_results)
+    msgs = String[]
+    param_names(plr) = [pc.parameter_name for pc in plr.profiles]
+    d = _zeroWidthParams(data_plr)
+    isempty(d) || push!(msgs, "data profile: $(param_names(data_plr)[d])")
+    for (i, uq) in enumerate(uq_results)
+        z = _zeroWidthParams(uq)
+        isempty(z) || push!(msgs, "cm_param_set $i: $(param_names(uq)[z])")
+    end
+    isempty(msgs) && return nothing
+    @warn "`buildPosterior`: zero-width profile-likelihood CI (ci_lower == ci_upper) for " *
+          join(msgs, "; ") * ". A zero-width box has zero volume, so its `:box_overlap` " *
+          "Jaccard score is 0. Check the profile resolution and range for these parameters."
+    return nothing
 end
 
 _boxScoreError(box_score) = ArgumentError(

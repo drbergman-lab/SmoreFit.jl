@@ -203,10 +203,13 @@ negative to 0.74–0.93.
   `_consistencyBox` as an argument, so interior queries reproduce stored scores. The 11-argument
   positional constructor is kept (defaults `:data_normalized`) so direct construction does not
   break in a patch release.
-- Degenerate data dimensions keep the existing containment test; Jaccard is computed over the
-  remaining dimensions (1.0 if none remain). Consequence: the symmetry / "1 only for identical
-  boxes" properties hold for non-degenerate boxes only — a degenerate data dimension contained by
-  a wide CM dimension is dropped rather than penalized.
+- Zero-width dimensions: the handoff proposed keeping `_boxOverlapScore`'s containment test
+  (drop a contained zero-width data dimension). Rejected in review: it gave a data point inside a
+  wide CM box a score of 1.0 (and the swapped pair 0), which breaks symmetry and rewards width.
+  Jaccard treats a box with a zero-width dimension as having zero volume, so the score is 0
+  (also when both are zero-width at the same point, 0 ÷ 0 → 0). A zero-width CI should only come
+  from a degenerate profile (e.g. −Inf log-likelihood beside the MLE, or a zero-width sweep), so
+  `buildPosterior` now warns whenever one appears.
 - `_boxOverlapScore` is unchanged byte-for-byte; `_boxJaccardScore` sits beside it.
 
 ### Testing note

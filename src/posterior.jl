@@ -113,6 +113,7 @@ function buildPosterior(
 
     p0_eff   = p0 === nothing ? _meanCmParamSetMLE(uq_results) : p0
     data_plr = _profileAgainstData(problem, p0_eff, profile_options)
+    _warnZeroWidthCIs(data_plr, uq_results)
 
     scores   = Float64[_consistency(uq, data_plr, bridge, box_score_eff) for uq in uq_results]
     accepted = BitVector(scores .> min_score)
