@@ -50,9 +50,6 @@ The SM fitting step (SmoreBase) produces SM parameters and their uncertainty for
     - `:data_normalized` — overlap volume ÷ data-box volume (the default through v0.5.x; v0.5.1
       warned that the default would change).
     - Any other symbol → `ArgumentError` naming the two valid values.
-  - Any zero-width profile CI (`ci_lower == ci_upper`), in the data profile or a CM param_set's,
-    logs one `@warn` per `buildPosterior` call naming the profiles and parameters, whatever the
-    bridge.
   - `profile_options::ProfileLikelihood`, `p0`, `loss`, `min_score`, `interp`
 - Output: `CMPosteriorResult` — stores `accepted` and `scores` per cm_param_set plus the
   `cm_sample` (grid-aware), `cm_names`, the CM param_sets' `uq_results`, derived `lb_table`/`ub_table`,

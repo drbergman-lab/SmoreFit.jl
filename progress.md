@@ -209,7 +209,9 @@ negative to 0.74–0.93.
   Jaccard treats a box with a zero-width dimension as having zero volume, so the score is 0
   (also when both are zero-width at the same point, 0 ÷ 0 → 0). A zero-width CI should only come
   from a degenerate profile (e.g. −Inf log-likelihood beside the MLE, or a zero-width sweep), so
-  `buildPosterior` now warns whenever one appears.
+  v0.5.1's `buildPosterior` warns whenever one appears. v0.6.0 drops that warning: SmoreBase
+  (drbergman-lab/SmoreBase.jl#23) now warns at the source every time a CI is computed with zero
+  width, which covers every caller, not only `buildPosterior`.
 - `_boxOverlapScore` is unchanged byte-for-byte; `_boxJaccardScore` sits beside it.
 - v0.6.0 drops the `nothing` sentinel and the warning, and also the 11-argument positional
   constructor. That constructor was kept in v0.5.1 only so a patch release would not break

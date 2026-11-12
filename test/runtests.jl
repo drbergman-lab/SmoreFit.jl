@@ -349,7 +349,7 @@ _logistic(t, p, _c) = reshape(
         @test wide_default.scores[3] < 0.1
     end
 
-    @testset "zero-width CI warning" begin
+    @testset "zero-width CI scores 0 under Jaccard" begin
         # Collapse the K profile's CI of cm_param_set 2 to a point.
         function _collapseK(uq)
             pcs = map(uq.profiles) do pc
@@ -362,12 +362,8 @@ _logistic(t, p, _c) = reshape(
         end
         uq_zero    = copy(uq_results)
         uq_zero[2] = _collapseK(uq_results[2])
-        warn = Base.CoreLogging.Warn
-        post = @test_logs (:warn, r"zero-width.*cm_param_set 2.*K") min_level = warn match_mode = :any buildPosterior(
-            sm, data, uq_zero, cm_params; box_score = :jaccard)
+        post = buildPosterior(sm, data, uq_zero, cm_params; box_score = :jaccard)
         @test post.scores[2] == 0.0
-        # No warning when every CI has positive width.
-        @test_logs min_level = warn buildPosterior(sm, data, uq_results, cm_params; box_score = :jaccard)
     end
 
     @testset "validation" begin
