@@ -342,33 +342,25 @@ _logistic(t, p, _c) = reshape(
             b = buildPosterior(sm, data, uq_results, cm_params; bridge = bridge, box_score = :data_normalized)
             @test a.scores == b.scores
         end
-
-        # Positional constructor without box_score (the v0.5.0 field list) still works.
-        legacy = CMPosteriorResult(
-            post_dn.cm_sample, post_dn.cm_names, post_dn.accepted, post_dn.scores, post_dn.bridge,
-            post_dn.min_score, post_dn.data_profiles, post_dn.uq_results, post_dn.lb_table,
-            post_dn.ub_table, post_dn.get_bounds,
-        )
-        @test legacy.box_score == :data_normalized
-        @test posteriorScore(legacy, [cvals[3]]) ≈ post_dn.scores[3]
     end
 
-    @testset "box_score default (v0.5.1): data-normalized, with a warning" begin
-        warn = Base.CoreLogging.Warn
-        post_default = @test_logs (:warn, r"Jaccard") min_level = warn buildPosterior(sm, data, uq_results, cm_params)
-        post_dn      = buildPosterior(sm, data, uq_results, cm_params; box_score = :data_normalized)
-        @test post_default.box_score == :data_normalized
-        @test post_default.scores   == post_dn.scores
-        @test post_default.accepted == post_dn.accepted
+    @testset "box_score default (v0.6): Jaccard, no warning" begin
+        post_default = @test_logs min_level = Base.CoreLogging.Warn buildPosterior(sm, data, uq_results, cm_params)
+        post_j       = buildPosterior(sm, data, uq_results, cm_params; box_score = :jaccard)
+        @test post_default.box_score == :jaccard
+        @test post_default.scores   == post_j.scores
+        @test post_default.accepted == post_j.accepted
 
-        # No warning when box_score is explicit, nor for the trace bridges.
-        @test_logs min_level = warn buildPosterior(sm, data, uq_results, cm_params; box_score = :jaccard)
-        @test_logs min_level = warn buildPosterior(sm, data, uq_results, cm_params; box_score = :data_normalized)
-        @test_logs min_level = warn buildPosterior(sm, data, uq_results, cm_params; bridge = :data_trace_in_box)
-        @test_logs min_level = warn buildPosterior(sm, data, uq_results, cm_params; bridge = :symmetric_trace)
+        # Where the scores differ (a CM box containing the data box), the default is Jaccard's.
+        uq_wide    = copy(uq_results)
+        uq_wide[3] = _profileAt(3.0; σ = 5noise)
+        wide_default = buildPosterior(sm, data, uq_wide, cm_params)
+        wide_j       = buildPosterior(sm, data, uq_wide, cm_params; box_score = :jaccard)
+        @test wide_default.scores == wide_j.scores
+        @test wide_default.scores[3] < 0.1
     end
 
-    @testset "zero-width CI warning" begin
+    @testset "zero-width CI scores 0 under Jaccard" begin
         # Collapse the K profile's CI of cm_param_set 2 to a point.
         function _collapseK(uq)
             pcs = map(uq.profiles) do pc
@@ -381,12 +373,8 @@ _logistic(t, p, _c) = reshape(
         end
         uq_zero    = copy(uq_results)
         uq_zero[2] = _collapseK(uq_results[2])
-        warn = Base.CoreLogging.Warn
-        post = @test_logs (:warn, r"zero-width.*cm_param_set 2.*K") min_level = warn match_mode = :any buildPosterior(
-            sm, data, uq_zero, cm_params; box_score = :jaccard)
+        post = buildPosterior(sm, data, uq_zero, cm_params; box_score = :jaccard)
         @test post.scores[2] == 0.0
-        # No warning when every CI has positive width.
-        @test_logs min_level = warn buildPosterior(sm, data, uq_results, cm_params; box_score = :jaccard)
     end
 
     @testset "validation" begin

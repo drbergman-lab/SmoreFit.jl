@@ -44,16 +44,14 @@ wrapped with `CMSample` (from SmoreBase: grid if possible, else scattered).
 - `bridge::Symbol = :box_overlap` — overlap test: `:box_overlap` (box-vs-box overlap volume,
   scored per `box_score`), `:data_trace_in_box` (data profile trace points inside the CM box),
   or `:symmetric_trace`
-- `box_score::Union{Nothing,Symbol} = nothing` — how `:box_overlap` scores the overlap of the
-  CM box and the data box (ignored by the trace bridges):
+- `box_score::Symbol = :jaccard` — how `:box_overlap` scores the overlap of the CM box and the
+  data box (ignored by the trace bridges):
   - `:jaccard` — overlap volume ÷ volume of the union of the two boxes (the Jaccard index).
     Symmetric, and 1 only for identical boxes, so a wide CM box (e.g. an open CI stretched to
     the swept-range edge) is penalized for its width.
-  - `:data_normalized` — overlap volume ÷ data-box volume. Not symmetric: a CM box that
-    contains the data box scores 1.0 however large it is.
-  Leaving it unset currently means `:data_normalized` and, with `bridge = :box_overlap`, logs a
-  one-time warning: **the default becomes `:jaccard` in SmoreFit v0.6.** Pass `box_score`
-  explicitly to choose a score and silence the warning. Any other value throws `ArgumentError`.
+  - `:data_normalized` — overlap volume ÷ data-box volume (the default before v0.6). Not
+    symmetric: a CM box that contains the data box scores 1.0 however large it is.
+  Any other value throws `ArgumentError`.
 - `profile_options::ProfileLikelihood = ProfileLikelihood()` — settings for the **data**
   profile (the CM-side profiles in `uq_results` are already final and not recomputed)
 - `p0 = nothing` — initial guess for the **data** fit (`[1 × n_sm_params]`); defaults to the
@@ -75,7 +73,7 @@ wrapped with `CMSample` (from SmoreBase: grid if possible, else scattered).
 ```julia
 # If you already have an SMFitProblem for the real data in hand:
 problem = SMFitProblem(sm, data, sm_prior)              # SM + real data + SM prior
-post    = buildPosterior(problem, uq_results, cm_params; bridge = :box_overlap, box_score = :jaccard)
+post    = buildPosterior(problem, uq_results, cm_params; bridge = :box_overlap)
 
 # Otherwise, pass sm and the real data directly:
 post = buildPosterior(sm, data, uq_results, cm_params)
@@ -89,7 +87,7 @@ function buildPosterior(
     cm_sample::AbstractCMSample;
     cm_names::Vector{String} = cm_sample.names,
     bridge::Symbol = :box_overlap,
-    box_score::Union{Nothing,Symbol} = nothing,
+    box_score::Symbol = :jaccard,
     profile_options::ProfileLikelihood = ProfileLikelihood(),
     p0 = nothing,
     min_score::Real = 0.0,
@@ -109,13 +107,12 @@ function buildPosterior(
     bridge in (:box_overlap, :data_trace_in_box, :symmetric_trace) || throw(ArgumentError(
         "unknown bridge :$bridge; expected :box_overlap, :data_trace_in_box, or :symmetric_trace"
     ))
-    box_score_eff = _resolveBoxScore(box_score, bridge)
+    _validateBoxScore(box_score)
 
     p0_eff   = p0 === nothing ? _meanCmParamSetMLE(uq_results) : p0
     data_plr = _profileAgainstData(problem, p0_eff, profile_options)
-    _warnZeroWidthCIs(data_plr, uq_results)
 
-    scores   = Float64[_consistency(uq, data_plr, bridge, box_score_eff) for uq in uq_results]
+    scores   = Float64[_consistency(uq, data_plr, bridge, box_score) for uq in uq_results]
     accepted = BitVector(scores .> min_score)
 
     # Per-cm_param_set SM-parameter CI tables, used both to build the grid bounds interpolant for
@@ -142,22 +139,8 @@ function buildPosterior(
         cm_sample, cm_names, accepted, scores, bridge,
         Float64(min_score), data_plr,
         Vector{ProfileLikelihoodResult}(uq_results), lb_table, ub_table, get_bounds,
-        box_score_eff,
+        box_score,
     )
-end
-
-# Resolve the `box_score` keyword. `nothing` (unset) keeps the v0.5.0 score, `:data_normalized`,
-# and — for the `:box_overlap` bridge, the only one it affects — warns once per session that the
-# default changes to `:jaccard` in v0.6.
-function _resolveBoxScore(box_score::Union{Nothing,Symbol}, bridge::Symbol)
-    box_score === nothing || return _validateBoxScore(box_score)
-    if bridge === :box_overlap
-        @warn "`buildPosterior`: the `:box_overlap` bridge currently scores overlap ÷ data-box " *
-              "volume. In SmoreFit v0.6 the default becomes the Jaccard index (overlap ÷ union). " *
-              "Pass `box_score = :jaccard` to adopt it now, or `box_score = :data_normalized` to " *
-              "keep the current score and silence this warning." maxlog = 1
-    end
-    return :data_normalized
 end
 
 # problem + raw cm_params matrix

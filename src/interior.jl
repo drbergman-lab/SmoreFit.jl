@@ -20,6 +20,12 @@ function _requireInteriorSupport(post::CMPosteriorResult)
     return nothing
 end
 
+# Score a CM-side box with the bridge settings `post` was built with (data profile, bridge,
+# box_score), so interior queries at a sampled CM point reproduce its stored score.
+# `buildPosterior` calls the five-argument method directly, since `post` doesn't exist yet.
+_consistencyBox(cm_lo, cm_hi, post::CMPosteriorResult) =
+    _consistencyBox(cm_lo, cm_hi, post.data_profiles, post.bridge, post.box_score)
+
 """
     posteriorScore(post::CMPosteriorResult, θ_cm::AbstractVector) -> Float64
     posteriorScore(post::CMPosteriorResult, queries::AbstractMatrix) -> Vector{Float64}
@@ -43,7 +49,7 @@ posteriorScore(post, [θ1_a θ2_a; θ1_b θ2_b])   # batch
 function posteriorScore(post::CMPosteriorResult, θ_cm::AbstractVector)
     _requireInteriorSupport(post)
     lb, ub = post.get_bounds(θ_cm)
-    return _consistencyBox(lb, ub, post.data_profiles, post.bridge, post.box_score)
+    return _consistencyBox(lb, ub, post)
 end
 
 function posteriorScore(post::CMPosteriorResult, queries::AbstractMatrix)
@@ -52,7 +58,7 @@ function posteriorScore(post::CMPosteriorResult, queries::AbstractMatrix)
     out = Vector{Float64}(undef, n)
     for k in 1:n
         lb, ub = post.get_bounds(@view queries[k, :])
-        out[k] = _consistencyBox(lb, ub, post.data_profiles, post.bridge, post.box_score)
+        out[k] = _consistencyBox(lb, ub, post)
     end
     return out
 end

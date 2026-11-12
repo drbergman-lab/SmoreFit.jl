@@ -75,8 +75,8 @@ end
 # widths in the SM parameters' native coordinates. Symmetric, in [0, 1], and 1 only for
 # identical boxes of positive volume. A zero-width dimension in either box makes the overlap
 # volume zero, so the score is 0 — including when both boxes are zero-width at the same point
-# (0 ÷ 0 is taken as 0, never `NaN`). `buildPosterior` warns when a profile produces a
-# zero-width CI.
+# (0 ÷ 0 is taken as 0, never `NaN`). SmoreBase warns when a profile produces a zero-width
+# CI.
 #
 # Computed as 1 / (V_cm/V_∩ + V_data/V_∩ - 1) rather than V_∩ / V_∪: each volume ratio is a
 # product of per-dimension width ratios ≥ 1, so no product of raw widths can underflow or
@@ -92,29 +92,6 @@ function _boxJaccardScore(cm_lo, cm_hi, d_lo, d_hi)
         d_ratio  *= (d_hi[j] - d_lo[j]) / overlap
     end
     return 1 / (cm_ratio + d_ratio - 1)
-end
-
-# SM-parameter indices whose box (CI, with the swept-edge fallback) has zero width.
-_zeroWidthParams(plr::ProfileLikelihoodResult) = let (lo, hi) = _profileBox(plr)
-    findall(lo .== hi)
-end
-
-# Warn once per `buildPosterior` call if any profile — the data's or a CM param_set's — produced a
-# zero-width CI. Such a box has zero volume, so the Jaccard score against it is 0.
-function _warnZeroWidthCIs(data_plr::ProfileLikelihoodResult, uq_results)
-    msgs = String[]
-    param_names(plr) = [pc.parameter_name for pc in plr.profiles]
-    d = _zeroWidthParams(data_plr)
-    isempty(d) || push!(msgs, "data profile: $(param_names(data_plr)[d])")
-    for (i, uq) in enumerate(uq_results)
-        z = _zeroWidthParams(uq)
-        isempty(z) || push!(msgs, "cm_param_set $i: $(param_names(uq)[z])")
-    end
-    isempty(msgs) && return nothing
-    @warn "`buildPosterior`: zero-width profile-likelihood CI (ci_lower == ci_upper) for " *
-          join(msgs, "; ") * ". A zero-width box has zero volume, so its `:box_overlap` " *
-          "Jaccard score is 0. Check the profile resolution and range for these parameters."
-    return nothing
 end
 
 _boxScoreError(box_score) = ArgumentError(

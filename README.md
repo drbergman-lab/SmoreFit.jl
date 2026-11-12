@@ -63,14 +63,13 @@ A `nothing` CI bound (unidentified on that side) falls back to the profile's swe
 
 | `box_score` | Score |
 |---|---|
-| `:jaccard` | Overlap volume ÷ volume of the union of the two boxes (Jaccard index). Symmetric; 1 only for identical boxes. |
+| `:jaccard` *(default)* | Overlap volume ÷ volume of the union of the two boxes (Jaccard index). Symmetric; 1 only for identical boxes. |
 | `:data_normalized` | Overlap volume ÷ data-box volume. Not symmetric: a CM box containing the data box scores 1 however large it is. |
 
-The default is `:data_normalized`, and using it logs a one-time warning: **in SmoreFit v0.6 the default becomes `:jaccard`.** The data-normalized score rewards width — an open CI stretched to the swept-range edge contains the data box and scores 1 — while Jaccard penalizes it. Pass `box_score` explicitly to choose a score and silence the warning:
+The default is `:jaccard` (since v0.6; earlier versions used `:data_normalized`). The data-normalized score rewards width — an open CI stretched to the swept-range edge contains the data box and scores 1 — while Jaccard penalizes it. To reproduce pre-v0.6 scores:
 
 ```julia
-post = buildPosterior(sm, data, uq_results, cm_params; box_score = :jaccard)          # adopt the v0.6 default now
-post = buildPosterior(sm, data, uq_results, cm_params; box_score = :data_normalized)  # keep the v0.5.0 score
+post = buildPosterior(sm, data, uq_results, cm_params; box_score = :data_normalized)
 ```
 
 The chosen score is stored on the result (`post.box_score`) and reused by interior queries.
