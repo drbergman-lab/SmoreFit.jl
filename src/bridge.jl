@@ -77,18 +77,21 @@ end
 # volume zero, so the score is 0 — including when both boxes are zero-width at the same point
 # (0 ÷ 0 is taken as 0, never `NaN`). `buildPosterior` warns when a profile produces a
 # zero-width CI.
+#
+# Computed as 1 / (V_cm/V_∩ + V_data/V_∩ - 1) rather than V_∩ / V_∪: each volume ratio is a
+# product of per-dimension width ratios ≥ 1, so no product of raw widths can underflow or
+# overflow. Identical boxes score exactly 1 at any width and dimension, and a ratio that
+# overflows to `Inf` gives 0, never `NaN`.
 function _boxJaccardScore(cm_lo, cm_hi, d_lo, d_hi)
-    overlap_vol = 1.0
-    cm_vol      = 1.0
-    d_vol       = 1.0
+    cm_ratio = 1.0   # V_cm ÷ V_∩
+    d_ratio  = 1.0   # V_data ÷ V_∩
     for j in eachindex(cm_lo)
         overlap = min(cm_hi[j], d_hi[j]) - max(cm_lo[j], d_lo[j])
         overlap <= 0 && return 0.0
-        overlap_vol *= overlap
-        cm_vol      *= cm_hi[j] - cm_lo[j]
-        d_vol       *= d_hi[j] - d_lo[j]
+        cm_ratio *= (cm_hi[j] - cm_lo[j]) / overlap
+        d_ratio  *= (d_hi[j] - d_lo[j]) / overlap
     end
-    return overlap_vol / (cm_vol + d_vol - overlap_vol)
+    return 1 / (cm_ratio + d_ratio - 1)
 end
 
 # SM-parameter indices whose box (CI, with the swept-edge fallback) has zero width.
