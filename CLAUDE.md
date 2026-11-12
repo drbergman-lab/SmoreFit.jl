@@ -9,7 +9,6 @@ Assistant professor working on computational modeling of cancer-immune interacti
 |----------|---------|
 | [README.md](README.md) | Project overview + **Implementation Status** (what is built, what remains) |
 | [PRD.md](PRD.md) | Behavioral specification for every feature — acceptance criteria and edge cases |
-| [progress.md](progress.md) | Session journal: decisions made, approaches rejected, open questions |
 
 Start any feature session by reading the relevant PRD entry and the Implementation Status section of `README.md`.
 
@@ -72,11 +71,10 @@ The human reviews diffs and stages files themselves. Do not run `git add`, `git 
 1. Generate a **design brief** in the assistant response **before any code changes**.
 2. Wait for human approval.
    1. Update PRD.md to include new feature or changes.
-   2. Open a new entry in progress.md and log design process, decisions, open questions.
 3. Create the feature branch: `git checkout -b feature/<desc>`.
 4. Implement in the feature branch only.
 5. Update [README.md](README.md) Implementation Status when a feature is complete.
-6. Trim PRD.md and progress.md to reflect final implementation before merging.
+6. Trim PRD.md to reflect final implementation before merging.
 7. Tell the human the branch is ready; they will review, stage, and commit.
 
 **Design brief template:**
