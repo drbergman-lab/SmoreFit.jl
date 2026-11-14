@@ -121,6 +121,17 @@ _logistic(t, p, _c) = reshape(
         post_problem_sample = buildPosterior(problem, uq_results, CMSample(cm_params))
         @test post_problem_sample.accepted == post_sm.accepted
 
+        # The data-side problem is recorded: the one passed, or the one the (sm, data) form built.
+        @test post_problem.data_problem === problem
+        @test post_problem_sample.data_problem === problem
+        @test post_sm.data_problem isa SMFitProblem
+        @test post_sm.data_problem.sm === sm
+        @test post_sm.data_problem.data === data
+        @test post_sm.data_problem.prior === sm_prior
+        @test post_sm.data_problem.loss isa GaussianNLL
+        custom = CustomLoss((A, d, ki) -> SmoreBase._computeLoss(GaussianNLL(), A, d, ki))
+        @test buildPosterior(sm, data, uq_results, CMSample(cm_params); loss = custom).data_problem.loss === custom
+
         # Validation propagates from the problem's data.
         bad     = CMData(μ = rand(length(t), 2), σ = ones(length(t), 2), times = t, cm_param_sets = 2)
         bad_prob = SMFitProblem(sm, bad, sm_prior)
@@ -202,7 +213,27 @@ _logistic(t, p, _c) = reshape(
         scattered = ScatteredCMSample(cm_params)
         post_sc = buildPosterior(sm, data, uq_results, scattered)
         @test post_sc.get_bounds === nothing
+        @test post_sc.interp isa LinearCIInterp
         @test_throws ArgumentError posteriorScore(post_sc, [3.0])
+    end
+
+    @testset "provenance" begin
+        opts = ProfileLikelihood(n_points = 9)
+        post = buildPosterior(sm, data, uq_results, cm_params; profile_options = opts,
+                              interp = LinearCIInterp())
+
+        # Both sides' profile settings: data side from profile_options, CM side from upstream.
+        @test post.data_profiles.method === opts
+        @test all(uq -> uq.method == ProfileLikelihood(n_points = 12), post.uq_results)
+        @test length(post.data_profiles.profiles[1].profile_values) == 9
+
+        # get_bounds is a named callable and can be rebuilt from the stored fields alone.
+        @test post.interp isa LinearCIInterp
+        @test post.get_bounds isa SmoreBase.CIBoundsInterpolant
+        rebuilt = SmoreBase._buildBoundsInterpolant(post.cm_sample, post.lb_table, post.ub_table, post.interp)
+        for θ in ([1.0], [2.5], [3.7], [5.0])
+            @test rebuilt(θ) == post.get_bounds(θ)
+        end
     end
 
     @testset "_boxOverlapScore degenerate data dimensions" begin
