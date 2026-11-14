@@ -131,3 +131,8 @@ Interior queries require a `GridCMSample` layout and `bridge ∈ (:box_overlap, 
   (with batch + `min_score` override). Interpolates the per-cm_param_set SM-parameter CI bounds across
   the CM grid via `LinearCIInterp` and evaluates the chosen bridge against the data profile.
   `GridCMSample` + `:box_overlap` / `:data_trace_in_box` only; other configurations error.
+- [x] Posterior provenance (v0.7) — `CMPosteriorResult` records the data-side `SMFitProblem`
+  (`data_problem`) and the CI interpolation method (`interp`); both sides' profile settings
+  are on the profile results (`data_profiles.method`, `uq_results[i].method`, SmoreBase ≥
+  0.5.2). `get_bounds` is a named callable that saves and loads with JLD2 and can be rebuilt
+  from the stored fields.

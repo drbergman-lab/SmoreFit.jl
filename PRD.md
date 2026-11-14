@@ -54,6 +54,24 @@ The SM fitting step (SmoreBase) produces SM parameters and their uncertainty for
 - Output: `CMPosteriorResult` — stores `accepted` and `scores` per cm_param_set plus the
   `cm_sample` (grid-aware), `cm_names`, the CM param_sets' `uq_results`, derived `lb_table`/`ub_table`,
   a prebuilt bounds interpolator, and the `box_score` used (interior queries reuse it).
+- The result records what built it (v0.7):
+  - `data_problem::SMFitProblem` — the problem the SM was fitted and profiled against on the
+    data side; for the `(sm, data, …)` methods, the one they build internally.
+  - Profile settings for both sides come from SmoreBase's `ProfileLikelihoodResult.method`
+    (SmoreBase ≥ 0.5.2): `post.data_profiles.method` is the `profile_options` used here, and
+    each `post.uq_results[i].method` is the CM-side setting it was computed with (`nothing` if
+    assembled by hand). No separate posterior field duplicates them.
+  - `p0` is `post.data_profiles.fit_result.initial_parameters`.
+  - `interp::AbstractCIInterpolator` — stored for every layout. `get_bounds` is SmoreBase's named
+    callable `CIBoundsInterpolant` (not a closure), and
+    `SmoreBase._buildBoundsInterpolant(post.cm_sample, post.lb_table, post.ub_table, post.interp)`
+    rebuilds it from the stored fields alone.
+  - The data-side box and trace the bridges compared against are deliberately not stored or
+    exposed as public API; they remain reachable as `SmoreFit._profileBox(post.data_profiles)`
+    and `SmoreFit._profileTrace(post.data_profiles)`.
+  - **Breaking (v0.7):** the positional `CMPosteriorResult` constructor gains `data_problem`
+    (after `min_score`) and `interp` (before `get_bounds`), and posteriors saved by v0.6 do not
+    load as the v0.7 type.
   Accessors: `posteriorSamples` (hard accept/reject set) and
   `posteriorWeights` (normalized scores, a graded posterior), `acceptedGrid`, `scoreGrid` — which
   view of the posterior to use is a choice made at read time via these accessors, not a stored mode.
@@ -94,7 +112,11 @@ graded scores decrease away from the best match. `cm_names` defaults to `cm_samp
 overridden explicitly. `box_score = :jaccard` is symmetric and scores a wide CM box containing
 the data box below 1 (data-normalized: exactly 1); both scores accept the same cm_param_sets at
 `min_score = 0`; interior queries at a cm_param_set reproduce its stored score under either.
-Covered in `test/runtests.jl`.
+All four `buildPosterior` methods record `data_problem` and `interp`; `data_profiles.method` is
+the `profile_options` passed; `get_bounds` rebuilt from `cm_sample`, `lb_table`, `ub_table` and
+`interp` equals the stored one. Covered in `test/runtests.jl`. A posterior saved with JLD2
+loads in a fresh process with a working `get_bounds` (checked outside the test suite, which
+does not depend on JLD2).
 
 **Future directions (not implemented):**
 - Profile smoothing/refinement before bridging.
