@@ -157,7 +157,7 @@ _logistic(t, p, _c) = reshape(
                 BitVector([true]),
                 Any[nothing],
             )
-            ProfileLikelihoodResult{Float64}(uq.profiles, fit, uq.times)
+            ProfileLikelihoodResult{Float64}(uq.profiles, fit, uq.times, uq.method)
         end, uq_results)
 
         @test size(per_point_uq[1].fit_result.parameters, 1) == 1   # confirm the setup
@@ -400,7 +400,7 @@ _logistic(t, p, _c) = reshape(
                     pc.log_likelihoods, pc.optimal_parameters, pc.ci_lower, pc.ci_lower,
                     pc.threshold, pc.reference_ll)
             end
-            ProfileLikelihoodResult{Float64}(pcs, uq.fit_result, uq.times)
+            ProfileLikelihoodResult{Float64}(pcs, uq.fit_result, uq.times, uq.method)
         end
         uq_zero    = copy(uq_results)
         uq_zero[2] = _collapseK(uq_results[2])
