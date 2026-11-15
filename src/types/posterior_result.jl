@@ -33,8 +33,7 @@ settings (`bridge`, `box_score`, `min_score`) and the interpolation method (`int
   field holds the data-side profile settings (`buildPosterior`'s `profile_options`), and
   `data_profiles.fit_result.initial_parameters` is the data fit's starting point (`p0`)
 - `uq_results` — the CM param_sets' profiles, one per row of `cm_sample.params`. Each
-  `uq_results[i].method` holds the CM-side profile settings it was computed with (`nothing`
-  for a result assembled by hand)
+  `uq_results[i].method` holds the CM-side profile settings it was computed with
 - `lb_table`, `ub_table` — `[n_cm_param_sets × n_sm_params]` per-cm_param_set SM-parameter CI lower/upper bounds
   derived from `uq_results` (with `nothing` falling back to the profile's swept-range extreme,
   matching the `:box_overlap` bridge)

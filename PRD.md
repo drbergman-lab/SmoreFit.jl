@@ -59,8 +59,7 @@ The SM fitting step (SmoreBase) produces SM parameters and their uncertainty for
     data side; for the `(sm, data, …)` methods, the one they build internally.
   - Profile settings for both sides come from SmoreBase's `ProfileLikelihoodResult.method`
     (SmoreBase ≥ 0.5.2): `post.data_profiles.method` is the `profile_options` used here, and
-    each `post.uq_results[i].method` is the CM-side setting it was computed with (`nothing` if
-    assembled by hand). No separate posterior field duplicates them.
+    each `post.uq_results[i].method` is the CM-side setting it was computed with. No separate posterior field duplicates them.
   - `p0` is `post.data_profiles.fit_result.initial_parameters`.
   - `interp::AbstractCIInterpolator` — stored for every layout. `get_bounds` is SmoreBase's named
     callable `CIBoundsInterpolant` (not a closure), and
