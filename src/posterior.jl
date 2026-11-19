@@ -53,7 +53,8 @@ wrapped with `CMSample` (from SmoreBase: grid if possible, else scattered).
     symmetric: a CM box that contains the data box scores 1.0 however large it is.
   Any other value throws `ArgumentError`.
 - `profile_options::ProfileLikelihood = ProfileLikelihood()` — settings for the **data**
-  profile (the CM-side profiles in `uq_results` are already final and not recomputed)
+  profile (the CM-side profiles in `uq_results` are already final and not recomputed);
+  recorded as `post.data_profiles.method`
 - `p0 = nothing` — initial guess for the **data** fit (`[1 × n_sm_params]`); defaults to the
   column-mean of the CM param_sets' SM fits
 - `loss::AbstractLoss = GaussianNLL()` — loss for the **data** fit, *only on the
@@ -62,7 +63,8 @@ wrapped with `CMSample` (from SmoreBase: grid if possible, else scattered).
   the default threshold for [`inPosterior`](@ref) interior queries
 - `interp::AbstractCIInterpolator = LinearCIInterp()` — how the per-cm_param_set SM-parameter CI
   bounds are interpolated across the CM grid for interior queries; only consulted when
-  `cm_sample isa GridCMSample` (interior queries are not built for scattered layouts)
+  `cm_sample isa GridCMSample` (interior queries are not built for scattered layouts);
+  stored as `post.interp` for every layout
 
 # Returns
 [`CMPosteriorResult`](@ref). Use [`posteriorSamples`](@ref) for accepted CM sets,
@@ -137,8 +139,8 @@ function buildPosterior(
 
     return CMPosteriorResult(
         cm_sample, cm_names, accepted, scores, bridge,
-        Float64(min_score), data_plr,
-        Vector{ProfileLikelihoodResult}(uq_results), lb_table, ub_table, get_bounds,
+        Float64(min_score), problem, data_plr,
+        Vector{ProfileLikelihoodResult}(uq_results), lb_table, ub_table, interp, get_bounds,
         box_score,
     )
 end
