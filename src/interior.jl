@@ -32,7 +32,7 @@ _consistencyBox(cm_lo, cm_hi, post::CMPosteriorResult) =
 
 Consistency score at one or more interior CM parameter points, using the same bridge (and,
 for `:box_overlap`, the same `box_score`) and the same gate (`post.gate`) that produced
-`post`. The CM-side SM-parameter CI bounds are interpolated across the CM grid; the data-side
+`post`; a point that fails the gate scores 0. The CM-side SM-parameter CI bounds are interpolated across the CM grid; the data-side
 profile (`post.data_profiles`) is unchanged.
 
 `queries[k, :]` is the k-th query point; the vector form is one query.

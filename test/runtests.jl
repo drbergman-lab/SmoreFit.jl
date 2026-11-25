@@ -11,7 +11,7 @@ _logistic(t, p, _c) = reshape(
 
 # A user-defined gate: only the first CM param_set keeps its score.
 struct _KeepFirstGate <: AbstractGate end
-SmoreFit.applyGate(::_KeepFirstGate, scores, uq_results, data_profiles) =
+SmoreFit.gateScores(::_KeepFirstGate, scores, uq_results, data_profiles) =
     (scores = [i == 1 ? Float64(scores[i]) : 0.0 for i in eachindex(scores)], pass = BitVector(eachindex(scores) .== 1))
 
 @testset "buildPosterior" begin
@@ -44,23 +44,23 @@ SmoreFit.applyGate(::_KeepFirstGate, scores, uq_results, data_profiles) =
     @testset "bridge = $bridge" for bridge in (:box_overlap, :data_trace_in_box, :symmetric_trace)
         post = buildPosterior(sm, data, uq_results, cm_params; bridge = bridge)
         @test post isa CMPosteriorResult
-        @test length(post.scores) == 5
+        @test length(post.raw_scores) == 5
         @test post.bridge == bridge
 
         # The generating (center) CM param_set is accepted and scores highest.
         @test post.accepted[3]
-        @test argmax(post.scores) == 3
+        @test argmax(post.raw_scores) == 3
 
         # Far CM param_sets have disjoint SM regions → rejected at the default tolerance.
         @test !post.accepted[1]
         @test !post.accepted[5]
 
         # Scores decrease moving away from the center on both sides.
-        @test post.scores[3] >= post.scores[2] >= post.scores[1]
-        @test post.scores[3] >= post.scores[4] >= post.scores[5]
+        @test post.raw_scores[3] >= post.raw_scores[2] >= post.raw_scores[1]
+        @test post.raw_scores[3] >= post.raw_scores[4] >= post.raw_scores[5]
 
         # All scores are valid consistency values in [0, 1].
-        @test all(0.0 .<= post.scores .<= 1.0)
+        @test all(0.0 .<= post.raw_scores .<= 1.0)
     end
 
     @testset "posterior outputs" begin
@@ -73,7 +73,7 @@ SmoreFit.applyGate(::_KeepFirstGate, scores, uq_results, data_profiles) =
         # Grid-aware reshaping (1-D grid → length-5, axis sorted to match input order).
         @test length(acceptedGrid(post)) == 5
         @test acceptedGrid(post)[3] == true
-        @test scoreGrid(post) == post.scores
+        @test scoreGrid(post) == post.raw_scores
 
         # data_profiles is the SM profiled against the real data.
         @test post.data_profiles isa ProfileLikelihoodResult
@@ -120,7 +120,7 @@ SmoreFit.applyGate(::_KeepFirstGate, scores, uq_results, data_profiles) =
         post_sm      = buildPosterior(sm, data, uq_results, cm_params)
         post_problem = buildPosterior(problem, uq_results, cm_params)
         @test post_problem.accepted == post_sm.accepted
-        @test post_problem.scores   ≈  post_sm.scores
+        @test post_problem.raw_scores   ≈  post_sm.raw_scores
 
         # Same path with an explicit CMSample.
         post_problem_sample = buildPosterior(problem, uq_results, CMSample(cm_params))
@@ -177,7 +177,7 @@ SmoreFit.applyGate(::_KeepFirstGate, scores, uq_results, data_profiles) =
         post_shared    = buildPosterior(sm, data, uq_results,     cm_params)
         post_per_point = buildPosterior(sm, data, per_point_uq,   cm_params)
         @test post_per_point.accepted == post_shared.accepted
-        @test post_per_point.scores   ≈  post_shared.scores
+        @test post_per_point.raw_scores   ≈  post_shared.raw_scores
     end
 
     @testset "interior queries" begin
@@ -185,7 +185,7 @@ SmoreFit.applyGate(::_KeepFirstGate, scores, uq_results, data_profiles) =
 
         # Reproduce stored scores/acceptance at the cm_param_sets themselves.
         for i in 1:5
-            @test posteriorScore(post, [cvals[i]]) ≈ post.scores[i]
+            @test posteriorScore(post, [cvals[i]]) ≈ post.raw_scores[i]
             @test inPosterior(post, [cvals[i]])    == post.accepted[i]
         end
 
@@ -346,7 +346,7 @@ SmoreFit.applyGate(::_KeepFirstGate, scores, uq_results, data_profiles) =
 
         # Every CM box here lies inside the data box (the CM-side profiles are tighter), and then
         # union = data box, so the two scores coincide.
-        @test post_j.scores ≈ post_dn.scores
+        @test post_j.raw_scores ≈ post_dn.raw_scores
         @test post_j.accepted == post_dn.accepted
 
         # A CM box containing the data box separates them: noisier CM output at c = 3 widens its
@@ -359,24 +359,24 @@ SmoreFit.applyGate(::_KeepFirstGate, scores, uq_results, data_profiles) =
         cm_lo, cm_hi = SmoreFit._profileBox(uq_wide[3])
         d_lo,  d_hi  = SmoreFit._profileBox(wide_j.data_profiles)
         @test all(cm_lo .<= d_lo) && all(d_hi .<= cm_hi)   # confirm the setup: containment
-        @test wide_dn.scores[3] ≈ 1.0
-        @test wide_j.scores[3]  ≈ prod(d_hi .- d_lo) / prod(cm_hi .- cm_lo)
-        @test wide_j.scores[3]  < 0.1
+        @test wide_dn.raw_scores[3] ≈ 1.0
+        @test wide_j.raw_scores[3]  ≈ prod(d_hi .- d_lo) / prod(cm_hi .- cm_lo)
+        @test wide_j.raw_scores[3]  < 0.1
 
         # Overlap > 0 under either score, so acceptance at min_score = 0 is the same.
         @test wide_j.accepted == wide_dn.accepted
-        @test iszero.(wide_j.scores) == iszero.(wide_dn.scores)
+        @test iszero.(wide_j.raw_scores) == iszero.(wide_dn.raw_scores)
 
         # Interior queries reuse the stored box_score, reproducing the stored scores.
         for post in (post_dn, post_j, wide_dn, wide_j), i in 1:5
-            @test posteriorScore(post, [cvals[i]]) ≈ post.scores[i]
+            @test posteriorScore(post, [cvals[i]]) ≈ post.raw_scores[i]
         end
 
         # Ignored by the trace bridges, without error.
         for bridge in (:data_trace_in_box, :symmetric_trace)
             a = buildPosterior(sm, data, uq_results, cm_params; bridge = bridge, box_score = :jaccard)
             b = buildPosterior(sm, data, uq_results, cm_params; bridge = bridge, box_score = :data_normalized)
-            @test a.scores == b.scores
+            @test a.raw_scores == b.raw_scores
         end
     end
 
@@ -384,7 +384,7 @@ SmoreFit.applyGate(::_KeepFirstGate, scores, uq_results, data_profiles) =
         post_default = @test_logs min_level = Base.CoreLogging.Warn buildPosterior(sm, data, uq_results, cm_params)
         post_j       = buildPosterior(sm, data, uq_results, cm_params; box_score = :jaccard)
         @test post_default.box_score == :jaccard
-        @test post_default.scores   == post_j.scores
+        @test post_default.raw_scores   == post_j.raw_scores
         @test post_default.accepted == post_j.accepted
 
         # Where the scores differ (a CM box containing the data box), the default is Jaccard's.
@@ -392,8 +392,8 @@ SmoreFit.applyGate(::_KeepFirstGate, scores, uq_results, data_profiles) =
         uq_wide[3] = _profileAt(3.0; σ = 5noise)
         wide_default = buildPosterior(sm, data, uq_wide, cm_params)
         wide_j       = buildPosterior(sm, data, uq_wide, cm_params; box_score = :jaccard)
-        @test wide_default.scores == wide_j.scores
-        @test wide_default.scores[3] < 0.1
+        @test wide_default.raw_scores == wide_j.raw_scores
+        @test wide_default.raw_scores[3] < 0.1
     end
 
     @testset "zero-width CI scores 0 under Jaccard" begin
@@ -410,7 +410,7 @@ SmoreFit.applyGate(::_KeepFirstGate, scores, uq_results, data_profiles) =
         uq_zero    = copy(uq_results)
         uq_zero[2] = _collapseK(uq_results[2])
         post = buildPosterior(sm, data, uq_zero, cm_params; box_score = :jaccard)
-        @test post.scores[2] == 0.0
+        @test post.raw_scores[2] == 0.0
     end
 
     @testset "buildPosterior gate and min_score = :elbow" begin
@@ -441,30 +441,51 @@ SmoreFit.applyGate(::_KeepFirstGate, scores, uq_results, data_profiles) =
             @test raw isa CMPosteriorResult{LinearCIInterp,NullGate}
             @test gated isa CMPosteriorResult{LinearCIInterp,IdentifiabilityMatchGate}
             @test openSides(raw.data_profiles) == falses(4)
-            @test raw.scores[3] > 0                       # the gate, not the bridge, removes it
+            @test raw.raw_scores[3] > 0                   # the gate, not the bridge, removes it
 
-            g = applyGate(match, raw)
-            @test g.pass == [true, false, false, true, true]
+            # The posterior keeps the bridge's scores and records who passes.
+            @test gated.raw_scores == raw.raw_scores
+            @test gated.gate_pass == [true, false, false, true, true]
+            @test all(raw.gate_pass)
+            expected = [raw.raw_scores[1], 0.0, 0.0, raw.raw_scores[4], raw.raw_scores[5]]
+            @test gated.raw_scores[gated.gate_pass] == raw.raw_scores[[1, 4, 5]]
+
+            # Everything aligned with the CM grid treats a failing cm_param_set as score 0.
+            @test scoreGrid(gated) == expected
+            @test gated.accepted == (expected .> 0)
+            @test !any(gated.accepted[.!gated.gate_pass])
+            @test posteriorSamples(gated) == cm_params[gated.accepted, :]
+            w = posteriorWeights(gated)
+            @test w[2] == 0.0 && w[3] == 0.0
+            @test sum(expected) == 0 ? all(iszero, w) : w ≈ expected ./ sum(expected)
+            @test scoreGrid(raw) == raw.raw_scores
+
+            # applyGate(post): the stored gate's result, in full.
+            g = applyGate(gated)
+            @test g.scores == expected
+            @test g.pass == gated.gate_pass
             @test g.mismatch[2, :] == [false, false, false, true]
-            @test g.scores == [raw.scores[1], 0.0, 0.0, raw.scores[4], raw.scores[5]]
-            @test gated.scores == g.scores
-            @test gated.accepted == (g.scores .> 0)
-            @test applyGate(match, gated).scores == gated.scores             # idempotent
-            @test applyGate(match, raw.scores, uq_open, raw.data_profiles) == g
-
-            # NullGate changes nothing
-            n = applyGate(NullGate(), raw)
-            @test n.scores == raw.scores
+            n = applyGate(raw)
+            @test n.scores == raw.raw_scores
             @test all(n.pass)
+            @test !haskey(n, :mismatch)
 
-            # min_score = :elbow stores τ_elbow of the scores it thresholds
+            # applyGate(gate, post): another gate on the same raw scores; post is not changed.
+            @test applyGate(match, raw) == g
+            @test raw.gate === NullGate() && all(raw.gate_pass)
+            @test applyGate(NullGate(), gated).scores == gated.raw_scores
+            @test gated.gate_pass == [true, false, false, true, true]
+
+            # min_score = :elbow: τ_elbow of the scores that pass the gate, stored on the result.
             el = buildPosterior(sm, data, uq_open, cm_params; bridge = bridge, gate = match, min_score = :elbow)
-            @test el.scores == g.scores
-            @test el.min_score == elbowThreshold(g.scores).tau
-            @test el.accepted == (g.scores .> el.min_score)
+            @test el.raw_scores == raw.raw_scores
+            @test el.gate_pass == gated.gate_pass
+            @test el.min_score == elbowThreshold(el.raw_scores[el.gate_pass]).tau
+            @test el.min_score == elbowThreshold(expected).tau
+            @test el.accepted == el.gate_pass .& (el.raw_scores .> el.min_score)
             el_raw = buildPosterior(sm, data, uq_open, cm_params; bridge = bridge, min_score = :elbow)
-            @test el_raw.min_score == elbowThreshold(raw.scores).tau
-            @test el_raw.scores == raw.scores
+            @test el_raw.min_score == elbowThreshold(raw.raw_scores).tau
+            @test el_raw.raw_scores == raw.raw_scores
         end
 
         @testset "interior queries apply the gate: $bridge" for bridge in (:box_overlap, :data_trace_in_box)
@@ -472,7 +493,7 @@ SmoreFit.applyGate(::_KeepFirstGate, scores, uq_results, data_profiles) =
             gated = buildPosterior(sm, data, uq_open, cm_params; bridge = bridge, gate = match)
             # At the sampled CM points an interior query reproduces the stored (gated) score.
             for (k, c) in enumerate(cvals)
-                @test posteriorScore(gated, [c]) == gated.scores[k]
+                @test posteriorScore(gated, [c]) == scoreGrid(gated)[k]
             end
             # Between two CM param_sets that are open in K above (2 and 3): the interpolated
             # upper bound is at the edge of the swept range → open → fails (data is bounded).
@@ -492,7 +513,9 @@ SmoreFit.applyGate(::_KeepFirstGate, scores, uq_results, data_profiles) =
 
         # A gate with no interior method: grid scores work, interior queries say why they cannot.
         post_custom = buildPosterior(sm, data, uq_results, cm_params; gate = _KeepFirstGate())
-        @test post_custom.scores[2:end] == zeros(4)
+        @test post_custom.gate_pass == [true, false, false, false, false]
+        @test scoreGrid(post_custom)[2:end] == zeros(4)
+        @test applyGate(post_custom).pass == post_custom.gate_pass
         @test post_custom isa CMPosteriorResult{LinearCIInterp,_KeepFirstGate}
         @test_throws ArgumentError posteriorScore(post_custom, [2.5])
 
@@ -520,7 +543,7 @@ SmoreFit.applyGate(::_KeepFirstGate, scores, uq_results, data_profiles) =
     end
 end
 
-@testset "applyGate" begin
+@testset "identifiability-match rule on CI shapes" begin
     scores    = [0.9, 0.5, 0.3, 0.0, 0.7]
     open_data = [false, false, false, true]              # K open above
     open_grid = Bool[
@@ -530,7 +553,7 @@ end
         0 0 0 1      # pass (score already 0)
         0 1 0 0      # two sides differ → fail
     ]
-    g = applyGate(IdentifiabilityMatchGate(), scores, open_grid, open_data)
+    g = SmoreFit._matchShapes(scores, open_grid, open_data)
     @test g.scores == [0.9, 0.0, 0.0, 0.0, 0.0]
     @test g.scores isa Vector{Float64}
     @test g.pass == [true, false, false, true, false]
@@ -538,11 +561,11 @@ end
     @test scores == [0.9, 0.5, 0.3, 0.0, 0.7]            # input untouched
 
     # integer scores and BitArray flags
-    gi = applyGate(IdentifiabilityMatchGate(), [1, 2], BitMatrix([0 0; 0 1]), BitVector([0, 0]))
+    gi = SmoreFit._matchShapes([1, 2], BitMatrix([0 0; 0 1]), BitVector([0, 0]))
     @test gi.scores == [1.0, 0.0]
 
-    @test_throws DimensionMismatch applyGate(IdentifiabilityMatchGate(), scores, open_grid[1:4, :], open_data)
-    @test_throws DimensionMismatch applyGate(IdentifiabilityMatchGate(), scores, open_grid, open_data[1:2])
+    @test_throws DimensionMismatch SmoreFit._matchShapes(scores, open_grid[1:4, :], open_data)
+    @test_throws DimensionMismatch SmoreFit._matchShapes(scores, open_grid, open_data[1:2])
 
     @test openSides([0.1, 5.0], [0.3, nothing]) == [false, false, false, true]
     @test openSides([missing, 5.0], [0.3, 9.0]) == [true, false, false, false]
@@ -605,7 +628,7 @@ end
     reference = BitVector([1, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0])      # a "true" set, for the Jaccard index
     jaccard(a, b) = count(a .& b) / count(a .| b)
 
-    g = applyGate(IdentifiabilityMatchGate(), scores, open_grid, open_data)
+    g = SmoreFit._matchShapes(scores, open_grid, open_data)
     @test findall(.!g.pass) == [3, 6, 11]
     @test g.mismatch[11, :] == [false, true, false, true]
     @test g.scores == [0.90, 0.80, 0.0, 0.70, 0.10, 0.0, 0.08, 0.05, 0.0, 0.04, 0.0, 0.02]
@@ -616,13 +639,14 @@ end
     @test jaccard(scores .> 0, reference) ≈ 3 / 11
     @test jaccard(g.scores .> 0, reference) ≈ 3 / 8
 
-    # Stage 3, gate + elbow. Sorted gated scores: 0.90 0.80 0.70 0.10 0.08 0.05 0.04 0.02;
+    # Stage 3, gate + elbow. Sorted passing scores: 0.90 0.80 0.70 0.10 0.08 0.05 0.04 0.02;
     # the point farthest below the line from (1, 0.90) to (8, 0.02) is rank 4, score 0.10.
-    e = elbowThreshold(g.scores)
+    e = elbowThreshold(scores[g.pass])
+    @test e == elbowThreshold(g.scores)             # a failing CM param_set counts as score 0
     @test e.tau == 0.10
     @test e.rank == 4
     @test e.n_positive == 8
-    accepted = g.scores .> e.tau
+    accepted = g.pass .& (scores .> e.tau)
     @test findall(accepted) == [1, 2, 4]
     @test jaccard(accepted, reference) == 1.0
 

@@ -50,34 +50,41 @@ The SM fitting step (SmoreBase) produces SM parameters and their uncertainty for
     - `:data_normalized` — overlap volume ÷ data-box volume (the default through v0.5.x; v0.5.1
       warned that the default would change).
     - Any other symbol → `ArgumentError` naming the two valid values.
-  - `gate::AbstractGate = NullGate()` — gate applied to the bridge scores before
-    thresholding; `scores` on the result are the gated scores.
-  - `min_score::Union{Real,Symbol} = 0.0` — acceptance threshold (`score > min_score`).
-    `:elbow` uses τ_elbow of the gated scores; the value used is stored. Any other symbol →
-    `ArgumentError`.
+  - `gate::AbstractGate = NullGate()` — the posterior's gate, chosen here once.
+  - `min_score::Union{Real,Symbol} = 0.0` — acceptance threshold. `:elbow` uses τ_elbow of the
+    scores that pass the gate; the value used is stored. Any other symbol → `ArgumentError`.
   - `profile_options::ProfileLikelihood`, `p0`, `loss`, `interp`
-- Gates — `AbstractGate`; `applyGate(gate, post)`, `applyGate(gate, scores, uq_results,
-  data_profiles)` → named tuple with `scores` and `pass`:
-  - `NullGate` — every cm_param_set passes; scores unchanged. The default.
+- Gates — `AbstractGate`:
+  - The gate lives on the posterior: `CMPosteriorResult` stores `gate`, `raw_scores` (the
+    bridge's scores, before any gate) and `gate_pass`. It does not store gated scores, and no
+    public function returns a failing cm_param_set's score as a score; the passing scores are
+    `raw_scores[gate_pass]`.
+  - Reads aligned with the CM grid treat a failing cm_param_set as score 0: `scoreGrid`,
+    `posteriorWeights`, the elbow, and `accepted = gate_pass .& (raw_scores .> min_score)`.
+  - `NullGate` — every cm_param_set passes. The default.
   - `IdentifiabilityMatchGate` — a CI side is open when SmoreBase reports its bound as
     `nothing` (`openSides(plr)` gives the flags in the order parameter 1 lower, parameter 1
     upper, parameter 2 lower, …). A cm_param_set passes iff every side of every SM parameter
-    has the data's shape; failing → score 0. Also returns `mismatch`, and has a method taking
-    the open flags directly.
+    has the data's shape.
+  - `applyGate(post)` → the stored gate's result: `scores` (0 where failing), `pass`, and for
+    `IdentifiabilityMatchGate` `mismatch`. `applyGate(gate, post)` evaluates a different gate
+    on the same raw scores and leaves `post` unchanged (the special case). There is no method
+    taking a new score vector.
+  - Extension point, unexported: `SmoreFit.gateScores(gate, scores, uq_results,
+    data_profiles)` → `(scores, pass, …)`; `buildPosterior` and `applyGate` call it.
   - Interior queries apply `post.gate` through `SmoreFit.gateInterior(gate, score, lb, ub,
     post)`. For `IdentifiabilityMatchGate` a side of the interpolated box is open iff its
     bound is at or beyond the edge of the range the CM-side profiles swept. At a sampled CM
-    point this reproduces the stored gated score.
-  - A new gate subtypes `AbstractGate` and adds an `applyGate` method; without a
-    `gateInterior` method its interior queries throw `ArgumentError`.
-  - `CMPosteriorResult{I<:AbstractCIInterpolator, G<:AbstractGate}` stores the gate.
+    point this reproduces the grid score. A gate without a `gateInterior` method throws
+    `ArgumentError` on interior queries.
+  - `CMPosteriorResult{I<:AbstractCIInterpolator, G<:AbstractGate}`.
 - Elbow threshold — `elbowThreshold(scores)` → `(tau, rank, n_positive, note)`:
   - Sort the positive scores high to low; scale rank and score to [0, 1]; join first and last
     with a straight line; τ_elbow is the score of the point farthest below it. Accept
     `score > τ_elbow`, so the elbow point is rejected and tied scores share one fate.
   - Fewer than three positive scores, or no point below the line → τ_elbow = 0, with `note`
     saying which.
-- Output: `CMPosteriorResult` — stores `accepted` and `scores` per cm_param_set plus the
+- Output: `CMPosteriorResult` — stores `accepted`, `raw_scores` and `gate_pass` per cm_param_set plus the
   `cm_sample` (grid-aware), `cm_names`, the CM param_sets' `uq_results`, derived `lb_table`/`ub_table`,
   a prebuilt bounds interpolator, and the `box_score` used (interior queries reuse it).
 - The result records what built it:
