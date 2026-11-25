@@ -17,15 +17,16 @@ among the cm_param_sets) can be queried via [`inPosterior`](@ref) and [`posterio
 
 The result also records what built it: the data-side problem (`data_problem`), both sides'
 profile settings (`data_profiles.method` and each `uq_results[i].method`), the bridge
-settings (`bridge`, `box_score`, `min_score`) and the interpolation method (`interp`).
+settings (`bridge`, `box_score`, `gate`, `min_score`) and the interpolation method (`interp`).
 
 # Fields
 - `cm_sample` — CM parameter points (`AbstractCMSample`), row-aligned with `accepted`/`scores`
 - `cm_names` — CM parameter names (defaults from `cm_sample.names`; override via `buildPosterior`'s `cm_names` kwarg)
 - `accepted` — `BitVector`; `true` where the cm_param_set's consistency score exceeds `min_score`
-- `scores` — consistency score per cm_param_set, in `[0, 1]`
+- `scores` — consistency score per cm_param_set, in `[0, 1]`; the gated scores when `gate` is `true`
 - `bridge` — the bridge method used (`:box_overlap`, `:data_trace_in_box`, `:symmetric_trace`)
-- `min_score` — threshold used for `accepted`; default for interior queries
+- `min_score` — threshold used for `accepted`; default for interior queries. When
+  `buildPosterior` was called with `min_score = :elbow`, this is the resulting τ_elbow
 - `data_problem` — the `SMFitProblem` (`sm`, real `data`, SM `prior`, `loss`) that the SM was
   fitted and profiled against on the data side; for the `(sm, data, …)` methods, the problem
   they build internally
@@ -46,6 +47,9 @@ settings (`bridge`, `box_score`, `min_score`) and the interpolation method (`int
   `buildPosterior`: `:jaccard` (overlap volume ÷ union volume; the default) or
   `:data_normalized` (overlap volume ÷ data-box volume). Interior queries reuse it, so they
   reproduce the stored `scores`. Recorded for every bridge but only consulted by `:box_overlap`.
+- `gate` — whether the [`identifiabilityGate`](@ref) was applied to `scores`. Interior queries
+  ([`posteriorScore`](@ref), [`inPosterior`](@ref)) do not apply the gate: an interpolated
+  box has no bounded-or-open shape
 
 The data-side SM-parameter box and trace that the bridges compared against are not stored;
 they are `SmoreFit._profileBox(post.data_profiles)` and `SmoreFit._profileTrace(post.data_profiles)`.
@@ -69,6 +73,7 @@ struct CMPosteriorResult
     interp         :: AbstractCIInterpolator
     get_bounds     :: Union{Nothing,Function}
     box_score      :: Symbol
+    gate           :: Bool
 end
 
 """

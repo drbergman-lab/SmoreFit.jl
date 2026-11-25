@@ -408,6 +408,59 @@ _logistic(t, p, _c) = reshape(
         @test post.scores[2] == 0.0
     end
 
+    @testset "buildPosterior gate and min_score = :elbow" begin
+        # K's upper CI side opened on cm_param_sets 2 and 3: they fail the gate (the data's CI is
+        # bounded everywhere), whatever their score
+        # (cm_param_set 3 is the generating one and scores highest).
+        _openK(uq) = let
+            pcs = map(uq.profiles) do pc
+                pc.parameter_name == "K" || return pc
+                ProfileCurve(pc.parameter_index, pc.parameter_name, pc.profile_values,
+                    pc.log_likelihoods, pc.optimal_parameters, pc.ci_lower, nothing,
+                    pc.threshold, pc.reference_ll)
+            end
+            ProfileLikelihoodResult{Float64}(pcs, uq.fit_result, uq.times, uq.method)
+        end
+        uq_open = copy(uq_results)
+        uq_open[2] = _openK(uq_results[2])
+        uq_open[3] = _openK(uq_results[3])
+        @test openSides(uq_open[2]) == [false, false, false, true]
+        @test openSides(uq_open[4]) == [false, false, false, false]
+
+        @testset "bridge = $bridge" for bridge in (:box_overlap, :data_trace_in_box, :symmetric_trace)
+            raw   = buildPosterior(sm, data, uq_open, cm_params; bridge = bridge)
+            gated = buildPosterior(sm, data, uq_open, cm_params; bridge = bridge, gate = true)
+            @test !raw.gate
+            @test gated.gate
+            @test openSides(raw.data_profiles) == falses(4)
+            @test raw.scores[3] > 0                       # the gate, not the bridge, removes it
+
+            g = identifiabilityGate(raw)
+            @test g.pass == [true, false, false, true, true]
+            @test g.mismatch[2, :] == [false, false, false, true]
+            @test g.scores == [raw.scores[1], 0.0, 0.0, raw.scores[4], raw.scores[5]]
+            @test gated.scores == g.scores
+            @test gated.accepted == (g.scores .> 0)
+            @test identifiabilityGate(gated).scores == gated.scores          # idempotent
+            @test identifiabilityGate(raw.scores, uq_open, raw.data_profiles) == g
+
+            # min_score = :elbow stores τ_elbow of the scores it thresholds
+            el = buildPosterior(sm, data, uq_open, cm_params; bridge = bridge, gate = true, min_score = :elbow)
+            @test el.scores == g.scores
+            @test el.min_score == elbowThreshold(g.scores).tau
+            @test el.accepted == (g.scores .> el.min_score)
+            el_raw = buildPosterior(sm, data, uq_open, cm_params; bridge = bridge, min_score = :elbow)
+            @test el_raw.min_score == elbowThreshold(raw.scores).tau
+            @test el_raw.scores == raw.scores
+        end
+
+        # defaults are unchanged
+        post = buildPosterior(sm, data, uq_results, cm_params)
+        @test !post.gate
+        @test post.min_score == 0.0
+        @test_throws ArgumentError buildPosterior(sm, data, uq_results, cm_params; min_score = :knee)
+    end
+
     @testset "validation" begin
         # data must have a single param set
         bad = CMData(μ = rand(length(t), 2), σ = ones(length(t), 2), times = t, cm_param_sets = 2)
@@ -422,5 +475,102 @@ _logistic(t, p, _c) = reshape(
         # unknown box_score, with any bridge
         @test_throws ArgumentError buildPosterior(sm, data, uq_results, cm_params; box_score = :union)
         @test_throws ArgumentError buildPosterior(sm, data, uq_results, cm_params; bridge = :data_trace_in_box, box_score = :union)
+    end
+end
+
+@testset "identifiabilityGate" begin
+    scores    = [0.9, 0.5, 0.3, 0.0, 0.7]
+    open_data = [false, false, false, true]              # K open above
+    open_grid = Bool[
+        0 0 0 1      # same shape → pass
+        0 0 0 0      # bounded where the data's is open → fail
+        1 0 0 1      # open where the data's is bounded → fail
+        0 0 0 1      # pass (score already 0)
+        0 1 0 0      # two sides differ → fail
+    ]
+    g = identifiabilityGate(scores, open_grid, open_data)
+    @test g.scores == [0.9, 0.0, 0.0, 0.0, 0.0]
+    @test g.scores isa Vector{Float64}
+    @test g.pass == [true, false, false, true, false]
+    @test g.mismatch == Bool[0 0 0 0; 0 0 0 1; 1 0 0 0; 0 0 0 0; 0 1 0 1]
+    @test scores == [0.9, 0.5, 0.3, 0.0, 0.7]            # input untouched
+
+    # integer scores and BitArray flags
+    gi = identifiabilityGate([1, 2], BitMatrix([0 0; 0 1]), BitVector([0, 0]))
+    @test gi.scores == [1.0, 0.0]
+
+    @test_throws DimensionMismatch identifiabilityGate(scores, open_grid[1:4, :], open_data)
+    @test_throws DimensionMismatch identifiabilityGate(scores, open_grid, open_data[1:2])
+
+    @test openSides([0.1, 5.0], [0.3, nothing]) == [false, false, false, true]
+    @test openSides([missing, 5.0], [0.3, 9.0]) == [true, false, false, false]
+    @test_throws DimensionMismatch openSides([0.1], [0.3, 1.0])
+end
+
+@testset "elbowThreshold" begin
+    # A sharp elbow: the point farthest below the line from (rank 1, 1.0) to (rank 6, 0.01).
+    e = elbowThreshold([0.02, 1.0, 0.0, 0.9, 0.05, 0.01, 0.0, 0.8])
+    @test e.tau == 0.05
+    @test e.rank == 4
+    @test e.n_positive == 6
+    @test e.note == ""
+
+    # Order and non-positive scores do not matter.
+    @test elbowThreshold([0.8, -1.0, 0.01, 0.05, 0.9, 0.02, 1.0]).tau == 0.05
+
+    # Tied scores share one fate: τ is a score value and acceptance is strict.
+    s = [1.0, 0.9, 0.1, 0.1, 0.1, 0.05]
+    et = elbowThreshold(s)
+    @test et.tau == 0.1
+    @test count(s .> et.tau) == 2
+
+    # τ_elbow = 0: fewer than three positive scores, all equal, or nothing below the line.
+    for s0 in (Float64[], [0.0, 0.0], [0.4], [0.4, 0.2, 0.0])
+        e0 = elbowThreshold(s0)
+        @test e0.tau == 0.0 && e0.rank == 0
+        @test e0.note == "fewer than three positive scores"
+        @test e0.n_positive == count(>(0), s0)
+    end
+    @test elbowThreshold([0.3, 0.3, 0.3]).note == "no point below the line (all positive scores equal)"
+    @test elbowThreshold([0.3, 0.3, 0.3]).tau == 0.0
+    concave = elbowThreshold([1.0, 0.95, 0.9, 0.1])      # every interior point above the line
+    @test concave.tau == 0.0
+    @test concave.note == "no point below the line"
+    @test elbowThreshold([3, 2, 1]).tau === 0.0          # on the line; integer input
+end
+
+# The round regime of the SMoRe bridge paper (79 × 61 CM grid): the scores of every CM param_set
+# that a method or brute force accepts, with its CI's open sides. The data's CI is bounded on
+# all four sides. Expected values are the stages table of that analysis.
+@testset "gate + elbow reproduce the paper's round regime" begin
+    lines = readlines(joinpath(@__DIR__, "fixtures", "round_79x61_scores.csv"))
+    @test split(lines[1], ",") == ["r_lo_open", "r_hi_open", "K_lo_open", "K_hi_open",
+                                   "bf_accepted", "exact_score", "box_score", "trace_score"]
+    rows      = [split(l, ",") for l in lines[2:end]]
+    open_grid = [parse(Bool, r[c]) for r in rows, c in 1:4]
+    bf        = [parse(Bool, r[5]) for r in rows]
+    open_data = falses(4)
+    jaccard(a, b) = count(a .& b) / count(a .| b)
+    @test count(bf) == 17
+
+    #          column  raw>0  gated>0  τ_elbow               rank  accepted  Jaccard index
+    expected = [
+        ("exact overlap", 6,  63, 63, 0.2001088139281828,  18, 17, 1.0),
+        ("box bridge",    7, 471, 56, 0.19842298651256357, 16, 15, 0.7777777777777778),
+        ("trace bridge",  8, 440, 36, 0.18181818181818182, 21, 20, 0.7619047619047619),
+    ]
+    @testset "$name" for (name, col, n_raw, n_gated, τ, rank, n_acc, J) in expected
+        raw = [parse(Float64, r[col]) for r in rows]
+        g   = identifiabilityGate(raw, open_grid, open_data)
+        e   = elbowThreshold(g.scores)
+        acc = g.scores .> e.tau
+        @test count(>(0), raw) == n_raw                  # stage 1: no filter
+        @test count(>(0), g.scores) == n_gated           # stage 2: gate only
+        @test e.n_positive == n_gated
+        @test e.tau == τ                                 # stage 3: gate + elbow
+        @test e.rank == rank
+        @test e.note == ""
+        @test count(acc) == n_acc
+        @test jaccard(acc, bf) ≈ J
     end
 end

@@ -50,7 +50,26 @@ The SM fitting step (SmoreBase) produces SM parameters and their uncertainty for
     - `:data_normalized` — overlap volume ÷ data-box volume (the default through v0.5.x; v0.5.1
       warned that the default would change).
     - Any other symbol → `ArgumentError` naming the two valid values.
-  - `profile_options::ProfileLikelihood`, `p0`, `loss`, `min_score`, `interp`
+  - `gate::Bool = false` — apply the identifiability gate to the bridge scores before
+    thresholding; `scores` on the result are then the gated scores.
+  - `min_score::Union{Real,Symbol} = 0.0` — acceptance threshold (`score > min_score`).
+    `:elbow` uses τ_elbow of the (gated, if `gate`) scores; the value used is stored. Any
+    other symbol → `ArgumentError`.
+  - `profile_options::ProfileLikelihood`, `p0`, `loss`, `interp`
+- Identifiability gate — `identifiabilityGate(post)`, `(scores, uq_results, data_profiles)` or
+  `(scores, open_grid, open_data)` → `(scores, pass, mismatch)`:
+  - A CI side is open when SmoreBase reports its bound as `nothing`; `openSides(plr)` gives the
+    flags in the order (parameter 1 lower, parameter 1 upper, parameter 2 lower, …).
+  - A cm_param_set passes iff every side of every SM parameter has the data's shape (bounded
+    where the data's is bounded, open where the data's is open). Failing → score 0.
+  - Uses only the CI shapes, so it is the same for every bridge and for scores computed
+    outside the package. Not applied by interior queries.
+- Elbow threshold — `elbowThreshold(scores)` → `(tau, rank, n_positive, note)`:
+  - Sort the positive scores high to low; scale rank and score to [0, 1]; join first and last
+    with a straight line; τ_elbow is the score of the point farthest below it. Accept
+    `score > τ_elbow`, so the elbow point is rejected and tied scores share one fate.
+  - Fewer than three positive scores, or no point below the line → τ_elbow = 0, with `note`
+    saying which.
 - Output: `CMPosteriorResult` — stores `accepted` and `scores` per cm_param_set plus the
   `cm_sample` (grid-aware), `cm_names`, the CM param_sets' `uq_results`, derived `lb_table`/`ub_table`,
   a prebuilt bounds interpolator, and the `box_score` used (interior queries reuse it).

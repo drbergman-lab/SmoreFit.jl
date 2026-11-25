@@ -9,9 +9,11 @@ include("bridge.jl")
 include("data_profiles.jl")
 include("posterior.jl")
 include("interior.jl")
+include("gate_elbow.jl")
 
 export buildPosterior, CMPosteriorResult
 export posteriorSamples, posteriorWeights, acceptedGrid, scoreGrid
 export inPosterior, posteriorScore
+export identifiabilityGate, elbowThreshold, openSides
 
 end

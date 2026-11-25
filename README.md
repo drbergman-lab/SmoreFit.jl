@@ -82,6 +82,34 @@ you call the accessor:
 - `posteriorSamples(post)` — hard accept/reject via `score > min_score`; the accepted CM vectors.
 - `posteriorWeights(post)` — the scores kept as a continuous graded posterior, normalized to sum to one.
 
+### Identifiability gate and elbow threshold
+
+Two filters turn raw bridge scores into an accepted set without a hand-picked threshold:
+
+- **Identifiability gate** — each side of each SM parameter's CI is either bounded or open (the profile never crossed its threshold inside the swept range). A CM param_set passes if its CI has the same shape as the data's CI on every side: bounded where the data's is bounded, open where the data's is open. A CM param_set that fails scores 0.
+- **Elbow threshold** — sort the positive scores from high to low, join the first and last with a straight line, and take the score of the point farthest below that line as τ_elbow; accept `score > τ_elbow`. Tied scores share one fate. With fewer than three positive scores, or no point below the line, τ_elbow = 0.
+
+```julia
+post = buildPosterior(sm, data, uq_results, cm_params; gate = true, min_score = :elbow)
+post.scores      # gated scores
+post.min_score   # τ_elbow
+post.accepted    # gated score > τ_elbow
+```
+
+Both are also plain functions, for inspecting each step or filtering scores computed elsewhere:
+
+```julia
+post = buildPosterior(sm, data, uq_results, cm_params)   # raw scores, min_score = 0
+g    = identifiabilityGate(post)        # (scores, pass, mismatch)
+e    = elbowThreshold(g.scores)         # (tau, rank, n_positive, note)
+accepted = g.scores .> e.tau
+
+identifiabilityGate(my_scores, uq_results, post.data_profiles)   # any score vector
+openSides(uq_results[1])                # [p1 lower, p1 upper, p2 lower, p2 upper, …]; true = open
+```
+
+Interior queries do not apply the gate (an interpolated box has no bounded-or-open shape); `inPosterior` still defaults to `post.min_score`.
+
 ### Interior CM-point queries
 
 The result stores the CM param_sets' `uq_results` and a prebuilt CI-bound interpolator over the CM grid, so you can query any interior CM point without re-running anything:
@@ -131,3 +159,7 @@ Interior queries require a `GridCMSample` layout and `bridge ∈ (:box_overlap, 
   (with batch + `min_score` override). Interpolates the per-cm_param_set SM-parameter CI bounds across
   the CM grid via `LinearCIInterp` and evaluates the chosen bridge against the data profile.
   `GridCMSample` + `:box_overlap` / `:data_trace_in_box` only; other configurations error.
+- [x] Identifiability gate and elbow threshold — `identifiabilityGate` (CI shape must match the
+  data's, else score 0), `elbowThreshold` (τ_elbow from the sorted positive scores) and
+  `openSides`, plus `gate` and `min_score = :elbow` on `buildPosterior`; `CMPosteriorResult`
+  records `gate`.
