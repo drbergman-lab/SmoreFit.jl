@@ -1,9 +1,8 @@
 # The two filters applied to bridge scores before a posterior is read off them:
-#   identifiabilityGate   scores + CI shapes → gated scores (a CM param_set whose CI shape
-#                         differs from the data's scores 0)
-#   elbowThreshold        scores → τ_elbow (accept score > τ_elbow)
-# Both are plain functions of scores and CI shapes, so they apply to any score — the bridges
-# here or one computed elsewhere. `buildPosterior` applies them via `gate` and `min_score = :elbow`.
+#   applyGate        scores + a gate → gated scores (a CM param_set that fails the gate scores 0)
+#   elbowThreshold   scores → τ_elbow (accept score > τ_elbow)
+# Both apply to any score — the bridges here or one computed elsewhere. `buildPosterior`
+# applies them via `gate` and `min_score = :elbow`. Gate types are in types/gates.jl.
 
 """
     openSides(plr::ProfileLikelihoodResult) -> Vector{Bool}
@@ -34,48 +33,82 @@ function openSides(lower, upper)
 end
 
 """
-    identifiabilityGate(post::CMPosteriorResult) -> (scores, pass, mismatch)
-    identifiabilityGate(scores, uq_results, data_profiles::ProfileLikelihoodResult)
-    identifiabilityGate(scores, open_grid::AbstractMatrix{Bool}, open_data::AbstractVector{Bool})
+    applyGate(gate::AbstractGate, post::CMPosteriorResult) -> NamedTuple
+    applyGate(gate::AbstractGate, scores, uq_results, data_profiles::ProfileLikelihoodResult)
+    applyGate(gate::IdentifiabilityMatchGate, scores, open_grid::AbstractMatrix{Bool}, open_data::AbstractVector{Bool})
 
-The identifiability gate. Each side of each SM parameter's confidence interval is either
-bounded or open (see [`openSides`](@ref)). A CM param_set passes the gate if, on every side of
-every SM parameter, its CI has the same shape as the data's CI: bounded where the data's is
-bounded, open where the data's is open. A CM param_set that fails has its score set to 0.
-
-The gate uses only the CI shapes, never the scores, so it is the same for every bridge and
-can be applied to scores computed outside this package.
+Apply a gate to a set of scores: every CM param_set that fails the gate has its score set to 0.
+[`buildPosterior`](@ref) does this itself when given a `gate`; call `applyGate` to inspect the
+gate's effect, or to gate scores computed outside this package.
 
 # Arguments
+- `gate` — an [`AbstractGate`](@ref): [`NullGate`](@ref) or [`IdentifiabilityMatchGate`](@ref)
 - `post` — a [`CMPosteriorResult`](@ref); gates `post.scores` using `post.uq_results` and
   `post.data_profiles`. Gating an already gated result returns the same scores.
 - `scores` — one score per CM param_set
 - `uq_results` — the CM param_sets' profile results, row-aligned with `scores`
 - `data_profiles` — the data's profile result
-- `open_grid` — `[n_cm_param_sets × n_sides]` open flags, each row in [`openSides`](@ref) order
-- `open_data` — the data's open flags, in the same order
+- `open_grid`, `open_data` — for [`IdentifiabilityMatchGate`](@ref) only, the CI shapes given
+  directly: `[n_cm_param_sets × n_sides]` open flags (each row in [`openSides`](@ref) order)
+  and the data's flags in the same order
 
 # Returns
-A named tuple:
+A named tuple with
 - `scores` — the gated scores (`Vector{Float64}`)
 - `pass` — `BitVector`, `true` where the CM param_set passes
-- `mismatch` — `BitMatrix` shaped like `open_grid`: the sides on which a CM param_set's shape
-  differs from the data's
+
+and, for [`IdentifiabilityMatchGate`](@ref),
+- `mismatch` — `BitMatrix`, `[n_cm_param_sets × n_sides]`: the sides on which a CM param_set's
+  CI shape differs from the data's
 
 # Example
 ```julia
-post = buildPosterior(sm, data, uq_results, cm_params)
-g    = identifiabilityGate(post)
+post = buildPosterior(sm, data, uq_results, cm_params)          # raw scores
+g    = applyGate(IdentifiabilityMatchGate(), post)
 g.scores                  # post.scores with failing CM param_sets set to 0
 count(.!g.pass)           # how many CM param_sets fail
 τ    = elbowThreshold(g.scores).tau
 accepted = g.scores .> τ
 
 # or in one call:
-post = buildPosterior(sm, data, uq_results, cm_params; gate = true, min_score = :elbow)
+post = buildPosterior(sm, data, uq_results, cm_params;
+                      gate = IdentifiabilityMatchGate(), min_score = :elbow)
 ```
 """
-function identifiabilityGate(
+applyGate(gate::AbstractGate, post::CMPosteriorResult) =
+    applyGate(gate, post.scores, post.uq_results, post.data_profiles)
+
+function applyGate(
+    ::NullGate,
+    scores::AbstractVector{<:Real},
+    uq_results::AbstractVector{<:ProfileLikelihoodResult},
+    ::ProfileLikelihoodResult,
+)
+    _checkAligned(scores, uq_results)
+    return (scores = Float64.(scores), pass = trues(length(scores)))
+end
+
+function applyGate(
+    gate::IdentifiabilityMatchGate,
+    scores::AbstractVector{<:Real},
+    uq_results::AbstractVector{<:ProfileLikelihoodResult},
+    data_profiles::ProfileLikelihoodResult,
+)
+    _checkAligned(scores, uq_results)
+    open_data = openSides(data_profiles)
+    open_grid = Matrix{Bool}(undef, length(uq_results), length(open_data))
+    for (i, uq) in enumerate(uq_results)
+        sides = openSides(uq)
+        length(sides) == length(open_data) || throw(DimensionMismatch(
+            "uq_results[$i] has $(length(sides) ÷ 2) SM parameters, the data profile has $(length(open_data) ÷ 2)"
+        ))
+        open_grid[i, :] = sides
+    end
+    return applyGate(gate, scores, open_grid, open_data)
+end
+
+function applyGate(
+    ::IdentifiabilityMatchGate,
     scores::AbstractVector{<:Real},
     open_grid::AbstractMatrix{Bool},
     open_data::AbstractVector{Bool},
@@ -89,28 +122,45 @@ function identifiabilityGate(
     return (scores = gated, pass = pass, mismatch = mismatch)
 end
 
-function identifiabilityGate(
-    scores::AbstractVector{<:Real},
-    uq_results::AbstractVector{<:ProfileLikelihoodResult},
-    data_profiles::ProfileLikelihoodResult,
-)
-    length(uq_results) == length(scores) || throw(DimensionMismatch(
-        "length(uq_results)=$(length(uq_results)) must equal length(scores)=$(length(scores))"
-    ))
-    open_data = openSides(data_profiles)
-    open_grid = Matrix{Bool}(undef, length(uq_results), length(open_data))
-    for (i, uq) in enumerate(uq_results)
-        sides = openSides(uq)
-        length(sides) == length(open_data) || throw(DimensionMismatch(
-            "uq_results[$i] has $(length(sides) ÷ 2) SM parameters, the data profile has $(length(open_data) ÷ 2)"
-        ))
-        open_grid[i, :] = sides
+_checkAligned(scores, uq_results) = length(uq_results) == length(scores) || throw(DimensionMismatch(
+    "length(uq_results)=$(length(uq_results)) must equal length(scores)=$(length(scores))"
+))
+
+"""
+    SmoreFit.gateInterior(gate::AbstractGate, score, lb, ub, post::CMPosteriorResult) -> Float64
+
+Gate the `score` of one interior CM point, whose SM-parameter box `[lb, ub]` was interpolated
+across the CM grid of `post`. Called by [`posteriorScore`](@ref) with `post.gate`. Add a method
+for a new gate type to make interior queries work with it (see [`AbstractGate`](@ref)).
+
+- [`NullGate`](@ref) returns `score`.
+- [`IdentifiabilityMatchGate`](@ref) treats a side of the interpolated box as open when its
+  bound is at (or beyond) the edge of the range the CM-side profiles swept and as bounded when
+  it is strictly inside, and returns `score` if every side has the data's shape, else `0.0`.
+"""
+gateInterior(gate::AbstractGate, score, lb, ub, post) = throw(ArgumentError(
+    "interior queries are not supported for gate $(typeof(gate)); add a method of SmoreFit.gateInterior"
+))
+
+gateInterior(::NullGate, score, lb, ub, post) = Float64(score)
+
+function gateInterior(::IdentifiabilityMatchGate, score, lb, ub, post)
+    lo, hi    = _sweptRange(post.uq_results)
+    open_data = openSides(post.data_profiles)
+    for j in eachindex(lb)
+        (lb[j] <= lo[j]) == open_data[2j - 1] || return 0.0
+        (ub[j] >= hi[j]) == open_data[2j]     || return 0.0
     end
-    return identifiabilityGate(scores, open_grid, open_data)
+    return Float64(score)
 end
 
-identifiabilityGate(post::CMPosteriorResult) =
-    identifiabilityGate(post.scores, post.uq_results, post.data_profiles)
+# The range the CM-side profiles swept, per SM parameter: where `_profileBox` puts an open bound.
+function _sweptRange(uq_results)
+    k  = length(uq_results[1].profiles)
+    lo = [minimum(first(uq.profiles[j].profile_values) for uq in uq_results) for j in 1:k]
+    hi = [maximum(last(uq.profiles[j].profile_values) for uq in uq_results) for j in 1:k]
+    return lo, hi
+end
 
 """
     elbowThreshold(scores) -> (tau, rank, n_positive, note)
@@ -127,7 +177,7 @@ CM param_sets with tied scores are accepted or rejected together.
 If fewer than three scores are positive, or no point lies below the line (including when all
 positive scores are equal), τ_elbow is 0, which accepts every positive score.
 
-Usually applied to gated scores (see [`identifiabilityGate`](@ref)).
+Usually applied to gated scores (see [`applyGate`](@ref)).
 
 # Returns
 A named tuple:
@@ -138,7 +188,7 @@ A named tuple:
 
 # Example
 ```julia
-g = identifiabilityGate(post)
+g = applyGate(IdentifiabilityMatchGate(), post)
 e = elbowThreshold(g.scores)
 accepted = g.scores .> e.tau
 ```

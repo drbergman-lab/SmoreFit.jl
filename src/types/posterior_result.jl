@@ -23,7 +23,7 @@ settings (`bridge`, `box_score`, `gate`, `min_score`) and the interpolation meth
 - `cm_sample` — CM parameter points (`AbstractCMSample`), row-aligned with `accepted`/`scores`
 - `cm_names` — CM parameter names (defaults from `cm_sample.names`; override via `buildPosterior`'s `cm_names` kwarg)
 - `accepted` — `BitVector`; `true` where the cm_param_set's consistency score exceeds `min_score`
-- `scores` — consistency score per cm_param_set, in `[0, 1]`; the gated scores when `gate` is `true`
+- `scores` — consistency score per cm_param_set, in `[0, 1]`, after `gate` was applied
 - `bridge` — the bridge method used (`:box_overlap`, `:data_trace_in_box`, `:symmetric_trace`)
 - `min_score` — threshold used for `accepted`; default for interior queries. When
   `buildPosterior` was called with `min_score = :elbow`, this is the resulting τ_elbow
@@ -47,9 +47,11 @@ settings (`bridge`, `box_score`, `gate`, `min_score`) and the interpolation meth
   `buildPosterior`: `:jaccard` (overlap volume ÷ union volume; the default) or
   `:data_normalized` (overlap volume ÷ data-box volume). Interior queries reuse it, so they
   reproduce the stored `scores`. Recorded for every bridge but only consulted by `:box_overlap`.
-- `gate` — whether the [`identifiabilityGate`](@ref) was applied to `scores`. Interior queries
-  ([`posteriorScore`](@ref), [`inPosterior`](@ref)) do not apply the gate: an interpolated
-  box has no bounded-or-open shape
+- `gate` — the [`AbstractGate`](@ref) applied to `scores` ([`NullGate`](@ref) when none was).
+  Interior queries ([`posteriorScore`](@ref), [`inPosterior`](@ref)) apply the same gate
+
+The interpolator and the gate are type parameters: `CMPosteriorResult{I,G}` with
+`I <: AbstractCIInterpolator` and `G <: AbstractGate`.
 
 The data-side SM-parameter box and trace that the bridges compared against are not stored;
 they are `SmoreFit._profileBox(post.data_profiles)` and `SmoreFit._profileTrace(post.data_profiles)`.
@@ -58,7 +60,7 @@ they are `SmoreFit._profileBox(post.data_profiles)` and `SmoreFit._profileTrace(
 [`posteriorSamples`](@ref), [`posteriorWeights`](@ref), [`acceptedGrid`](@ref),
 [`scoreGrid`](@ref), [`inPosterior`](@ref), [`posteriorScore`](@ref).
 """
-struct CMPosteriorResult
+struct CMPosteriorResult{I<:AbstractCIInterpolator,G<:AbstractGate}
     cm_sample      :: AbstractCMSample
     cm_names       :: Vector{String}
     accepted       :: BitVector
@@ -70,10 +72,10 @@ struct CMPosteriorResult
     uq_results     :: Vector{ProfileLikelihoodResult}
     lb_table       :: Matrix{Float64}
     ub_table       :: Matrix{Float64}
-    interp         :: AbstractCIInterpolator
+    interp         :: I
     get_bounds     :: Union{Nothing,Function}
     box_score      :: Symbol
-    gate           :: Bool
+    gate           :: G
 end
 
 """

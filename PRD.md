@@ -50,20 +50,27 @@ The SM fitting step (SmoreBase) produces SM parameters and their uncertainty for
     - `:data_normalized` — overlap volume ÷ data-box volume (the default through v0.5.x; v0.5.1
       warned that the default would change).
     - Any other symbol → `ArgumentError` naming the two valid values.
-  - `gate::Bool = false` — apply the identifiability gate to the bridge scores before
-    thresholding; `scores` on the result are then the gated scores.
+  - `gate::AbstractGate = NullGate()` — gate applied to the bridge scores before
+    thresholding; `scores` on the result are the gated scores.
   - `min_score::Union{Real,Symbol} = 0.0` — acceptance threshold (`score > min_score`).
-    `:elbow` uses τ_elbow of the (gated, if `gate`) scores; the value used is stored. Any
-    other symbol → `ArgumentError`.
+    `:elbow` uses τ_elbow of the gated scores; the value used is stored. Any other symbol →
+    `ArgumentError`.
   - `profile_options::ProfileLikelihood`, `p0`, `loss`, `interp`
-- Identifiability gate — `identifiabilityGate(post)`, `(scores, uq_results, data_profiles)` or
-  `(scores, open_grid, open_data)` → `(scores, pass, mismatch)`:
-  - A CI side is open when SmoreBase reports its bound as `nothing`; `openSides(plr)` gives the
-    flags in the order (parameter 1 lower, parameter 1 upper, parameter 2 lower, …).
-  - A cm_param_set passes iff every side of every SM parameter has the data's shape (bounded
-    where the data's is bounded, open where the data's is open). Failing → score 0.
-  - Uses only the CI shapes, so it is the same for every bridge and for scores computed
-    outside the package. Not applied by interior queries.
+- Gates — `AbstractGate`; `applyGate(gate, post)`, `applyGate(gate, scores, uq_results,
+  data_profiles)` → named tuple with `scores` and `pass`:
+  - `NullGate` — every cm_param_set passes; scores unchanged. The default.
+  - `IdentifiabilityMatchGate` — a CI side is open when SmoreBase reports its bound as
+    `nothing` (`openSides(plr)` gives the flags in the order parameter 1 lower, parameter 1
+    upper, parameter 2 lower, …). A cm_param_set passes iff every side of every SM parameter
+    has the data's shape; failing → score 0. Also returns `mismatch`, and has a method taking
+    the open flags directly.
+  - Interior queries apply `post.gate` through `SmoreFit.gateInterior(gate, score, lb, ub,
+    post)`. For `IdentifiabilityMatchGate` a side of the interpolated box is open iff its
+    bound is at or beyond the edge of the range the CM-side profiles swept. At a sampled CM
+    point this reproduces the stored gated score.
+  - A new gate subtypes `AbstractGate` and adds an `applyGate` method; without a
+    `gateInterior` method its interior queries throw `ArgumentError`.
+  - `CMPosteriorResult{I<:AbstractCIInterpolator, G<:AbstractGate}` stores the gate.
 - Elbow threshold — `elbowThreshold(scores)` → `(tau, rank, n_positive, note)`:
   - Sort the positive scores high to low; scale rank and score to [0, 1]; join first and last
     with a straight line; τ_elbow is the score of the point farthest below it. Accept

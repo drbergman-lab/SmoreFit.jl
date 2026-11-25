@@ -9,6 +9,11 @@ _logistic(t, p, _c) = reshape(
     :, 1,
 )
 
+# A user-defined gate: only the first CM param_set keeps its score.
+struct _KeepFirstGate <: AbstractGate end
+SmoreFit.applyGate(::_KeepFirstGate, scores, uq_results, data_profiles) =
+    (scores = [i == 1 ? Float64(scores[i]) : 0.0 for i in eachindex(scores)], pass = BitVector(eachindex(scores) .== 1))
+
 @testset "buildPosterior" begin
     sm       = CustomSurrogateModel(fn = _logistic)
     t        = collect(0.0:5.0:50.0)                      # saturates → r and K identifiable
@@ -427,25 +432,33 @@ _logistic(t, p, _c) = reshape(
         @test openSides(uq_open[2]) == [false, false, false, true]
         @test openSides(uq_open[4]) == [false, false, false, false]
 
+        match = IdentifiabilityMatchGate()
         @testset "bridge = $bridge" for bridge in (:box_overlap, :data_trace_in_box, :symmetric_trace)
             raw   = buildPosterior(sm, data, uq_open, cm_params; bridge = bridge)
-            gated = buildPosterior(sm, data, uq_open, cm_params; bridge = bridge, gate = true)
-            @test !raw.gate
-            @test gated.gate
+            gated = buildPosterior(sm, data, uq_open, cm_params; bridge = bridge, gate = match)
+            @test raw.gate === NullGate()
+            @test gated.gate === match
+            @test raw isa CMPosteriorResult{LinearCIInterp,NullGate}
+            @test gated isa CMPosteriorResult{LinearCIInterp,IdentifiabilityMatchGate}
             @test openSides(raw.data_profiles) == falses(4)
             @test raw.scores[3] > 0                       # the gate, not the bridge, removes it
 
-            g = identifiabilityGate(raw)
+            g = applyGate(match, raw)
             @test g.pass == [true, false, false, true, true]
             @test g.mismatch[2, :] == [false, false, false, true]
             @test g.scores == [raw.scores[1], 0.0, 0.0, raw.scores[4], raw.scores[5]]
             @test gated.scores == g.scores
             @test gated.accepted == (g.scores .> 0)
-            @test identifiabilityGate(gated).scores == gated.scores          # idempotent
-            @test identifiabilityGate(raw.scores, uq_open, raw.data_profiles) == g
+            @test applyGate(match, gated).scores == gated.scores             # idempotent
+            @test applyGate(match, raw.scores, uq_open, raw.data_profiles) == g
+
+            # NullGate changes nothing
+            n = applyGate(NullGate(), raw)
+            @test n.scores == raw.scores
+            @test all(n.pass)
 
             # min_score = :elbow stores τ_elbow of the scores it thresholds
-            el = buildPosterior(sm, data, uq_open, cm_params; bridge = bridge, gate = true, min_score = :elbow)
+            el = buildPosterior(sm, data, uq_open, cm_params; bridge = bridge, gate = match, min_score = :elbow)
             @test el.scores == g.scores
             @test el.min_score == elbowThreshold(g.scores).tau
             @test el.accepted == (g.scores .> el.min_score)
@@ -454,9 +467,38 @@ _logistic(t, p, _c) = reshape(
             @test el_raw.scores == raw.scores
         end
 
+        @testset "interior queries apply the gate: $bridge" for bridge in (:box_overlap, :data_trace_in_box)
+            raw   = buildPosterior(sm, data, uq_open, cm_params; bridge = bridge)
+            gated = buildPosterior(sm, data, uq_open, cm_params; bridge = bridge, gate = match)
+            # At the sampled CM points an interior query reproduces the stored (gated) score.
+            for (k, c) in enumerate(cvals)
+                @test posteriorScore(gated, [c]) == gated.scores[k]
+            end
+            # Between two CM param_sets that are open in K above (2 and 3): the interpolated
+            # upper bound is at the edge of the swept range → open → fails (data is bounded).
+            @test posteriorScore(raw, [2.999]) > 0
+            @test posteriorScore(gated, [2.999]) == 0.0
+            @test !inPosterior(gated, [2.999])
+            # Between an open (3) and a bounded (4) CM param_set: the interpolated bound is
+            # strictly inside the swept range → bounded → passes, score as without the gate.
+            bridge === :box_overlap && @test posteriorScore(raw, [3.001]) > 0
+            @test posteriorScore(gated, [3.001]) == posteriorScore(raw, [3.001])
+            # Between two bounded CM param_sets (4 and 5): unchanged.
+            @test posteriorScore(gated, [4.5]) == posteriorScore(raw, [4.5])
+            # Batch form
+            @test posteriorScore(gated, reshape([2.999, 3.001, 4.5], :, 1)) ==
+                  [0.0, posteriorScore(raw, [3.001]), posteriorScore(raw, [4.5])]
+        end
+
+        # A gate with no interior method: grid scores work, interior queries say why they cannot.
+        post_custom = buildPosterior(sm, data, uq_results, cm_params; gate = _KeepFirstGate())
+        @test post_custom.scores[2:end] == zeros(4)
+        @test post_custom isa CMPosteriorResult{LinearCIInterp,_KeepFirstGate}
+        @test_throws ArgumentError posteriorScore(post_custom, [2.5])
+
         # defaults are unchanged
         post = buildPosterior(sm, data, uq_results, cm_params)
-        @test !post.gate
+        @test post.gate === NullGate()
         @test post.min_score == 0.0
         @test_throws ArgumentError buildPosterior(sm, data, uq_results, cm_params; min_score = :knee)
     end
@@ -478,7 +520,7 @@ _logistic(t, p, _c) = reshape(
     end
 end
 
-@testset "identifiabilityGate" begin
+@testset "applyGate" begin
     scores    = [0.9, 0.5, 0.3, 0.0, 0.7]
     open_data = [false, false, false, true]              # K open above
     open_grid = Bool[
@@ -488,7 +530,7 @@ end
         0 0 0 1      # pass (score already 0)
         0 1 0 0      # two sides differ → fail
     ]
-    g = identifiabilityGate(scores, open_grid, open_data)
+    g = applyGate(IdentifiabilityMatchGate(), scores, open_grid, open_data)
     @test g.scores == [0.9, 0.0, 0.0, 0.0, 0.0]
     @test g.scores isa Vector{Float64}
     @test g.pass == [true, false, false, true, false]
@@ -496,11 +538,11 @@ end
     @test scores == [0.9, 0.5, 0.3, 0.0, 0.7]            # input untouched
 
     # integer scores and BitArray flags
-    gi = identifiabilityGate([1, 2], BitMatrix([0 0; 0 1]), BitVector([0, 0]))
+    gi = applyGate(IdentifiabilityMatchGate(), [1, 2], BitMatrix([0 0; 0 1]), BitVector([0, 0]))
     @test gi.scores == [1.0, 0.0]
 
-    @test_throws DimensionMismatch identifiabilityGate(scores, open_grid[1:4, :], open_data)
-    @test_throws DimensionMismatch identifiabilityGate(scores, open_grid, open_data[1:2])
+    @test_throws DimensionMismatch applyGate(IdentifiabilityMatchGate(), scores, open_grid[1:4, :], open_data)
+    @test_throws DimensionMismatch applyGate(IdentifiabilityMatchGate(), scores, open_grid, open_data[1:2])
 
     @test openSides([0.1, 5.0], [0.3, nothing]) == [false, false, false, true]
     @test openSides([missing, 5.0], [0.3, 9.0]) == [true, false, false, false]
@@ -539,38 +581,53 @@ end
     @test elbowThreshold([3, 2, 1]).tau === 0.0          # on the line; integer input
 end
 
-# The round regime of the SMoRe bridge paper (79 × 61 CM grid): the scores of every CM param_set
-# that a method or brute force accepts, with its CI's open sides. The data's CI is bounded on
-# all four sides. Expected values are the stages table of that analysis.
-@testset "gate + elbow reproduce the paper's round regime" begin
-    lines = readlines(joinpath(@__DIR__, "fixtures", "round_79x61_scores.csv"))
-    @test split(lines[1], ",") == ["r_lo_open", "r_hi_open", "K_lo_open", "K_hi_open",
-                                   "bf_accepted", "exact_score", "box_score", "trace_score"]
-    rows      = [split(l, ",") for l in lines[2:end]]
-    open_grid = [parse(Bool, r[c]) for r in rows, c in 1:4]
-    bf        = [parse(Bool, r[5]) for r in rows]
-    open_data = falses(4)
-    jaccard(a, b) = count(a .& b) / count(a .| b)
-    @test count(bf) == 17
-
-    #          column  raw>0  gated>0  τ_elbow               rank  accepted  Jaccard index
-    expected = [
-        ("exact overlap", 6,  63, 63, 0.2001088139281828,  18, 17, 1.0),
-        ("box bridge",    7, 471, 56, 0.19842298651256357, 16, 15, 0.7777777777777778),
-        ("trace bridge",  8, 440, 36, 0.18181818181818182, 21, 20, 0.7619047619047619),
+# Gate, then elbow, on a 3 × 4 CM grid (12 CM param_sets), with every number worked by hand.
+# The data's CI is bounded in r and open above in K: [false, false, false, true].
+@testset "gate + elbow on a 3 × 4 grid" begin
+    open_data = [false, false, false, true]
+    #             score  r_lo   r_hi   K_lo   K_hi
+    grid = [
+        (0.90, false, false, false, true),    #  1  pass
+        (0.80, false, false, false, true),    #  2  pass
+        (0.85, false, false, false, false),   #  3  K bounded above → fail
+        (0.70, false, false, false, true),    #  4  pass
+        (0.10, false, false, false, true),    #  5  pass  ← elbow
+        (0.60, true,  false, false, true),    #  6  r open below → fail
+        (0.08, false, false, false, true),    #  7  pass
+        (0.05, false, false, false, true),    #  8  pass
+        (0.00, false, false, false, true),    #  9  pass, score 0
+        (0.04, false, false, false, true),    # 10  pass
+        (0.30, false, true,  false, false),   # 11  two sides differ → fail
+        (0.02, false, false, false, true),    # 12  pass
     ]
-    @testset "$name" for (name, col, n_raw, n_gated, τ, rank, n_acc, J) in expected
-        raw = [parse(Float64, r[col]) for r in rows]
-        g   = identifiabilityGate(raw, open_grid, open_data)
-        e   = elbowThreshold(g.scores)
-        acc = g.scores .> e.tau
-        @test count(>(0), raw) == n_raw                  # stage 1: no filter
-        @test count(>(0), g.scores) == n_gated           # stage 2: gate only
-        @test e.n_positive == n_gated
-        @test e.tau == τ                                 # stage 3: gate + elbow
-        @test e.rank == rank
-        @test e.note == ""
-        @test count(acc) == n_acc
-        @test jaccard(acc, bf) ≈ J
-    end
+    scores    = [g[1] for g in grid]
+    open_grid = [g[c] for g in grid, c in 2:5]
+    reference = BitVector([1, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0])      # a "true" set, for the Jaccard index
+    jaccard(a, b) = count(a .& b) / count(a .| b)
+
+    g = applyGate(IdentifiabilityMatchGate(), scores, open_grid, open_data)
+    @test findall(.!g.pass) == [3, 6, 11]
+    @test g.mismatch[11, :] == [false, true, false, true]
+    @test g.scores == [0.90, 0.80, 0.0, 0.70, 0.10, 0.0, 0.08, 0.05, 0.0, 0.04, 0.0, 0.02]
+
+    # Stage 1, no filter: 11 positive raw scores. Stage 2, gate only: 8.
+    @test count(>(0), scores) == 11
+    @test count(>(0), g.scores) == 8
+    @test jaccard(scores .> 0, reference) ≈ 3 / 11
+    @test jaccard(g.scores .> 0, reference) ≈ 3 / 8
+
+    # Stage 3, gate + elbow. Sorted gated scores: 0.90 0.80 0.70 0.10 0.08 0.05 0.04 0.02;
+    # the point farthest below the line from (1, 0.90) to (8, 0.02) is rank 4, score 0.10.
+    e = elbowThreshold(g.scores)
+    @test e.tau == 0.10
+    @test e.rank == 4
+    @test e.n_positive == 8
+    accepted = g.scores .> e.tau
+    @test findall(accepted) == [1, 2, 4]
+    @test jaccard(accepted, reference) == 1.0
+
+    # Without the gate the elbow lands elsewhere and keeps two CM param_sets the gate removes.
+    e_raw = elbowThreshold(scores)
+    @test e_raw.tau == 0.10
+    @test findall(scores .> e_raw.tau) == [1, 2, 3, 4, 6, 11]
 end

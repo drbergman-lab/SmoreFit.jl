@@ -31,9 +31,9 @@ _consistencyBox(cm_lo, cm_hi, post::CMPosteriorResult) =
     posteriorScore(post::CMPosteriorResult, queries::AbstractMatrix) -> Vector{Float64}
 
 Consistency score at one or more interior CM parameter points, using the same bridge (and,
-for `:box_overlap`, the same `box_score`) that produced `post`. The CM-side SM-parameter CI
-bounds are interpolated across the CM grid; the data-side profile (`post.data_profiles`) is
-unchanged.
+for `:box_overlap`, the same `box_score`) and the same gate (`post.gate`) that produced
+`post`. The CM-side SM-parameter CI bounds are interpolated across the CM grid; the data-side
+profile (`post.data_profiles`) is unchanged.
 
 `queries[k, :]` is the k-th query point; the vector form is one query.
 
@@ -49,7 +49,7 @@ posteriorScore(post, [θ1_a θ2_a; θ1_b θ2_b])   # batch
 function posteriorScore(post::CMPosteriorResult, θ_cm::AbstractVector)
     _requireInteriorSupport(post)
     lb, ub = post.get_bounds(θ_cm)
-    return _consistencyBox(lb, ub, post)
+    return gateInterior(post.gate, _consistencyBox(lb, ub, post), lb, ub, post)
 end
 
 function posteriorScore(post::CMPosteriorResult, queries::AbstractMatrix)
@@ -58,7 +58,7 @@ function posteriorScore(post::CMPosteriorResult, queries::AbstractMatrix)
     out = Vector{Float64}(undef, n)
     for k in 1:n
         lb, ub = post.get_bounds(@view queries[k, :])
-        out[k] = _consistencyBox(lb, ub, post)
+        out[k] = gateInterior(post.gate, _consistencyBox(lb, ub, post), lb, ub, post)
     end
     return out
 end

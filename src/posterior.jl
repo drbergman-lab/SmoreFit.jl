@@ -59,14 +59,14 @@ wrapped with `CMSample` (from SmoreBase: grid if possible, else scattered).
   column-mean of the CM param_sets' SM fits
 - `loss::AbstractLoss = GaussianNLL()` — loss for the **data** fit, *only on the
   `(sm, data, …)` forms*; the problem form uses `problem.loss`
-- `gate::Bool = false` — apply the [`identifiabilityGate`](@ref) to the bridge scores: a
+- `gate::AbstractGate = NullGate()` — gate applied to the bridge scores before thresholding
+  (see [`applyGate`](@ref)). [`IdentifiabilityMatchGate`](@ref) sets the score to 0 for every
   cm_param_set whose CI shape (bounded or open, per SM parameter and side) differs from the
-  data's has its score set to 0. `post.scores` then holds the gated scores
+  data's. `post.scores` holds the gated scores, and interior queries apply the same gate
 - `min_score::Union{Real,Symbol} = 0.0` — a cm_param_set is accepted iff its score exceeds
   this; also the default threshold for [`inPosterior`](@ref) interior queries. `:elbow` sets
-  it to τ_elbow, the [`elbowThreshold`](@ref) of the scores (the gated scores when
-  `gate = true`); the value used is stored as `post.min_score`. Any other symbol throws
-  `ArgumentError`
+  it to τ_elbow, the [`elbowThreshold`](@ref) of the gated scores; the value used is stored
+  as `post.min_score`. Any other symbol throws `ArgumentError`
 - `interp::AbstractCIInterpolator = LinearCIInterp()` — how the per-cm_param_set SM-parameter CI
   bounds are interpolated across the CM grid for interior queries; only consulted when
   `cm_sample isa GridCMSample` (interior queries are not built for scattered layouts);
@@ -87,7 +87,8 @@ post    = buildPosterior(problem, uq_results, cm_params; bridge = :box_overlap)
 post = buildPosterior(sm, data, uq_results, cm_params)
 
 # Identifiability gate, then the elbow threshold on the gated scores:
-post = buildPosterior(sm, data, uq_results, cm_params; gate = true, min_score = :elbow)
+post = buildPosterior(sm, data, uq_results, cm_params;
+                      gate = IdentifiabilityMatchGate(), min_score = :elbow)
 
 posteriorSamples(post)   # CM parameter vectors consistent with the data
 ```
@@ -101,7 +102,7 @@ function buildPosterior(
     box_score::Symbol = :jaccard,
     profile_options::ProfileLikelihood = ProfileLikelihood(),
     p0 = nothing,
-    gate::Bool = false,
+    gate::AbstractGate = NullGate(),
     min_score::Union{Real,Symbol} = 0.0,
     interp::AbstractCIInterpolator = LinearCIInterp(),
 )
@@ -128,7 +129,7 @@ function buildPosterior(
     data_plr = _profileAgainstData(problem, p0_eff, profile_options)
 
     scores   = Float64[_consistency(uq, data_plr, bridge, box_score) for uq in uq_results]
-    gate && (scores = identifiabilityGate(scores, uq_results, data_plr).scores)
+    scores    = applyGate(gate, scores, uq_results, data_plr).scores
     threshold = min_score === :elbow ? elbowThreshold(scores).tau : Float64(min_score)
     accepted  = BitVector(scores .> threshold)
 

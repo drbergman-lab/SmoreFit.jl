@@ -90,25 +90,28 @@ Two filters turn raw bridge scores into an accepted set without a hand-picked th
 - **Elbow threshold** — sort the positive scores from high to low, join the first and last with a straight line, and take the score of the point farthest below that line as τ_elbow; accept `score > τ_elbow`. Tied scores share one fate. With fewer than three positive scores, or no point below the line, τ_elbow = 0.
 
 ```julia
-post = buildPosterior(sm, data, uq_results, cm_params; gate = true, min_score = :elbow)
+post = buildPosterior(sm, data, uq_results, cm_params;
+                      gate = IdentifiabilityMatchGate(), min_score = :elbow)
 post.scores      # gated scores
 post.min_score   # τ_elbow
 post.accepted    # gated score > τ_elbow
 ```
 
-Both are also plain functions, for inspecting each step or filtering scores computed elsewhere:
+Each filter is also available on its own, for inspecting a step or filtering scores computed elsewhere:
 
 ```julia
 post = buildPosterior(sm, data, uq_results, cm_params)   # raw scores, min_score = 0
-g    = identifiabilityGate(post)        # (scores, pass, mismatch)
-e    = elbowThreshold(g.scores)         # (tau, rank, n_positive, note)
+g    = applyGate(IdentifiabilityMatchGate(), post)       # (scores, pass, mismatch)
+e    = elbowThreshold(g.scores)                          # (tau, rank, n_positive, note)
 accepted = g.scores .> e.tau
 
-identifiabilityGate(my_scores, uq_results, post.data_profiles)   # any score vector
+applyGate(IdentifiabilityMatchGate(), my_scores, uq_results, post.data_profiles)   # any score vector
 openSides(uq_results[1])                # [p1 lower, p1 upper, p2 lower, p2 upper, …]; true = open
 ```
 
-Interior queries do not apply the gate (an interpolated box has no bounded-or-open shape); `inPosterior` still defaults to `post.min_score`.
+**Gates are types.** `gate` takes any `AbstractGate`; the default `NullGate()` leaves the scores alone. The gate is stored on the result (`post.gate`) and is a type parameter of `CMPosteriorResult{I,G}`, alongside the interpolator. To add a gate, subtype `AbstractGate` and define `applyGate(gate, scores, uq_results, data_profiles)`; define `SmoreFit.gateInterior(gate, score, lb, ub, post)` as well if interior queries should work with it.
+
+**Interior queries apply the same gate.** For `IdentifiabilityMatchGate`, a side of the interpolated box counts as open when its bound sits at the edge of the range the CM-side profiles swept, and as bounded when it lies strictly inside. A point interpolated only from CM param_sets that are open on a side is therefore open there; one interpolated only from bounded CM param_sets is bounded.
 
 ### Interior CM-point queries
 
@@ -159,7 +162,8 @@ Interior queries require a `GridCMSample` layout and `bridge ∈ (:box_overlap, 
   (with batch + `min_score` override). Interpolates the per-cm_param_set SM-parameter CI bounds across
   the CM grid via `LinearCIInterp` and evaluates the chosen bridge against the data profile.
   `GridCMSample` + `:box_overlap` / `:data_trace_in_box` only; other configurations error.
-- [x] Identifiability gate and elbow threshold — `identifiabilityGate` (CI shape must match the
-  data's, else score 0), `elbowThreshold` (τ_elbow from the sorted positive scores) and
-  `openSides`, plus `gate` and `min_score = :elbow` on `buildPosterior`; `CMPosteriorResult`
-  records `gate`.
+- [x] Gates and elbow threshold — `AbstractGate` with `NullGate` (default) and
+  `IdentifiabilityMatchGate` (CI shape must match the data's, else score 0), applied by
+  `applyGate` and by `buildPosterior`'s `gate`, and by interior queries; `elbowThreshold`
+  (τ_elbow from the sorted positive scores) via `min_score = :elbow`; `openSides`.
+  `CMPosteriorResult{I,G}` carries the interpolator and gate types.
