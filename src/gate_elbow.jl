@@ -143,8 +143,9 @@ Add a method for a new gate type to make interior queries work with it (see [`Ab
 
 - [`NullGate`](@ref) returns `score`.
 - [`IdentifiabilityMatchGate`](@ref) treats a side of the interpolated box as open when its
-  bound is at (or beyond) the edge of the SM prior range and as bounded when it is strictly
-  inside, and returns `score` if every side has the data's shape, else `0.0`.
+  bound is at (or beyond) the edge of the profile range and as bounded when it is strictly
+  inside, and returns `score` if every side has the data's shape, else `0.0`. The profile range
+  is defined in the [`IdentifiabilityMatchGate`](@ref) docstring.
 """
 gateInterior(gate::AbstractGate, score, lb, ub, post) = throw(ArgumentError(
     "interior queries are not supported for gate $(typeof(gate)); add a method of SmoreFit.gateInterior"
@@ -162,9 +163,13 @@ function gateInterior(::IdentifiabilityMatchGate, score, lb, ub, post)
     return Float64(score)
 end
 
-# The SM-parameter range a profile covers: the SM prior range, known up front. An open CI bound
-# is stored at its edge (`_profileBox`). `ProfileLikelihood(bounds = ...)` can replace the prior
-# range for the profiles; when it is set, that range is the one used.
+# The profile range of each SM parameter: the range its profile covers, known up front.
+# - Normally it is the SM prior range.
+# - SmoreBase cannot build a profile over an unbounded prior (for example a Normal), so
+#   `ProfileLikelihood(bounds = ParameterPrior(lower, upper))` gives the profile a finite range.
+#   `bounds` can also be set to narrow a finite prior range. When it is set, it is the profile range.
+# An open CI bound is stored at the edge of the profile range (`_profileBox`), so that edge is
+# what tells an open side from a bounded one.
 function _profileRange(uq::ProfileLikelihoodResult)
     range = uq.method.bounds === nothing ? uq.fit_result.prior : uq.method.bounds
     return SmoreBase._lowerBounds(range), SmoreBase._upperBounds(range)

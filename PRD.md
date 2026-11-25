@@ -74,7 +74,9 @@ The SM fitting step (SmoreBase) produces SM parameters and their uncertainty for
     data_profiles)` → `(scores, pass, …)`; `buildPosterior` and `applyGate` call it.
   - Interior queries apply `post.gate` through `SmoreFit.gateInterior(gate, score, lb, ub,
     post)`. For `IdentifiabilityMatchGate` a side of the interpolated box is open iff its
-    bound is at or beyond the edge of the SM prior range. At a sampled CM
+    bound is at or beyond the edge of the profile range: the SM prior range, or the
+    range given by `ProfileLikelihood(bounds = ...)` when the profiles were run with it
+    (SmoreBase needs `bounds` for an unbounded prior; it can also narrow a finite one). At a sampled CM
     point this reproduces the grid score. A gate without a `gateInterior` method throws
     `ArgumentError` on interior queries.
   - `CMPosteriorResult{I<:AbstractCIInterpolator, G<:AbstractGate}`.

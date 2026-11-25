@@ -48,8 +48,14 @@ open where the data's is open. A CM param_set that fails counts as score 0.
 The gate uses only the CI shapes, never the scores, so it is the same for every bridge.
 
 At an interior CM point the CI shape is read off the interpolated box: a side is open if the
-interpolated bound sits at the edge of the SM prior range, and bounded if it
-lies strictly inside. So a point interpolated only from CM param_sets that are open on a side
-is open there, and one interpolated only from bounded CM param_sets is bounded.
+interpolated bound sits at the edge of the profile range, and bounded if it lies strictly
+inside. So a point interpolated only from CM param_sets that are open on a side is open there,
+and one interpolated only from bounded CM param_sets is bounded.
+
+The **profile range** of an SM parameter is the range its profile covers:
+- normally, the SM prior range;
+- if the profiles were run with `ProfileLikelihood(bounds = ...)`, that range instead. SmoreBase
+  needs `bounds` when the prior is unbounded (for example a Normal), because a profile needs a
+  finite range; `bounds` can also narrow a finite prior range.
 """
 struct IdentifiabilityMatchGate <: AbstractGate end

@@ -516,6 +516,36 @@ SmoreFit.gateScores(::_KeepFirstGate, scores, uq_results, data_profiles) =
                   [0.0, posteriorScore(raw, [3.001]), posteriorScore(raw, [4.5])]
         end
 
+        @testset "profile range: the prior range, or ProfileLikelihood's bounds" begin
+            # Without `bounds` the profile range is the SM prior range.
+            @test SmoreFit._profileRange(uq_results[1]) == ([0.01, 0.5], [2.0, 10.0])
+
+            # Profiles run with `bounds` narrower than the prior in K (upper edge 6 instead of 10).
+            narrow = ParameterPrior([0.01, 0.5], [2.0, 6.0]; names = ["r", "K"])
+            opts   = ProfileLikelihood(n_points = 12, bounds = narrow)
+            uq_b   = map(cvals) do c
+                d    = CMData(μ = vec(_logistic(t, [rtrue(c), Ktrue], nothing)), σ = noise .* ones(length(t)), times = t)
+                prob = SMFitProblem(sm, d, sm_prior)
+                quantifyUncertainty(opts, prob, fitSurrogate(prob, P0), 1)
+            end
+            @test SmoreFit._profileRange(uq_b[1]) == ([0.01, 0.5], [2.0, 6.0])
+            uq_b[2] = _openK(uq_b[2]); uq_b[3] = _openK(uq_b[3])
+
+            raw   = buildPosterior(sm, data, uq_b, cm_params)
+            gated = buildPosterior(sm, data, uq_b, cm_params; gate = match)
+            # An open side is stored at the edge of `bounds`, not of the prior.
+            @test gated.ub_table[3, 2] == 6.0
+            @test gated.gate_pass == [true, false, false, true, true]
+            # Interior gating compares against that edge: between the two open CM param_sets the
+            # interpolated K upper bound is 6.0 → open → fails; next to a bounded one it passes.
+            @test posteriorScore(raw, [2.999]) > 0
+            @test posteriorScore(gated, [2.999]) == 0.0
+            @test posteriorScore(gated, [3.001]) == posteriorScore(raw, [3.001])
+            for (k, c) in enumerate(cvals)
+                @test posteriorScore(gated, [c]) == scoreGrid(gated)[k]
+            end
+        end
+
         # A gate with no interior method: grid scores work, interior queries say why they cannot.
         post_custom = buildPosterior(sm, data, uq_results, cm_params; gate = _KeepFirstGate())
         @test post_custom.gate_pass == [true, false, false, false, false]
