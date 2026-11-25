@@ -63,18 +63,18 @@ The SM fitting step (SmoreBase) produces SM parameters and their uncertainty for
     `posteriorWeights`, the elbow, and `accepted = gate_pass .& (raw_scores .> min_score)`.
   - `NullGate` — every cm_param_set passes. The default.
   - `IdentifiabilityMatchGate` — a CI side is open when SmoreBase reports its bound as
-    `nothing` (`openSides(plr)` gives the flags in the order parameter 1 lower, parameter 1
-    upper, parameter 2 lower, …). A cm_param_set passes iff every side of every SM parameter
+    `nothing`; `openSides(plr)` gives the flags as `[n_sm_params × 2]`, columns (lower,
+    upper). A cm_param_set passes iff every side of every SM parameter
     has the data's shape.
   - `applyGate(post)` → the stored gate's result: `scores` (0 where failing), `pass`, and for
-    `IdentifiabilityMatchGate` `mismatch`. `applyGate(gate, post)` evaluates a different gate
+    `IdentifiabilityMatchGate` `mismatch` (`[n_cm_param_sets × n_sm_params × 2]`). `applyGate(gate, post)` evaluates a different gate
     on the same raw scores and leaves `post` unchanged (the special case). There is no method
     taking a new score vector.
   - Extension point, unexported: `SmoreFit.gateScores(gate, scores, uq_results,
     data_profiles)` → `(scores, pass, …)`; `buildPosterior` and `applyGate` call it.
   - Interior queries apply `post.gate` through `SmoreFit.gateInterior(gate, score, lb, ub,
     post)`. For `IdentifiabilityMatchGate` a side of the interpolated box is open iff its
-    bound is at or beyond the edge of the range the CM-side profiles swept. At a sampled CM
+    bound is at or beyond the edge of the SM prior range. At a sampled CM
     point this reproduces the grid score. A gate without a `gateInterior` method throws
     `ArgumentError` on interior queries.
   - `CMPosteriorResult{I<:AbstractCIInterpolator, G<:AbstractGate}`.

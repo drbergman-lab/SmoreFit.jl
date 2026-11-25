@@ -5,20 +5,22 @@
 # posterior's gate result. Gate types are in types/gates.jl.
 
 """
-    openSides(plr::ProfileLikelihoodResult) -> Vector{Bool}
-    openSides(lower, upper) -> Vector{Bool}
+    openSides(plr::ProfileLikelihoodResult) -> BitMatrix
+    openSides(lower, upper) -> BitMatrix
 
-Which sides of each SM parameter's confidence interval are open, in the order
-`(parameter 1 lower, parameter 1 upper, parameter 2 lower, parameter 2 upper, …)`; `true` = open.
+Which sides of each SM parameter's confidence interval are open, as `[n_sm_params × 2]`: row `j`
+is SM parameter `j`, column 1 its lower side, column 2 its upper side; `true` = open.
 
-A side is open when the profile did not cross its threshold inside the swept range, which
+A side is open when the profile did not cross its threshold inside the prior range, which
 SmoreBase reports as a `nothing` bound (`ProfileCurve.ci_lower` / `ci_upper`). The second form
 takes the bounds directly, one entry per parameter; `nothing` and `missing` both count as open.
 
 # Example
 ```julia
 uq = quantifyUncertainty(ProfileLikelihood(), problem, fit, 1)
-openSides(uq)                      # e.g. [false, false, false, true]: parameter 2 is open above
+open = openSides(uq)     # e.g. [false false; false true]: parameter 2 is open above
+open[2, 2]               # is parameter 2 open on its upper side?
+any(open)                # is any side open?
 openSides([0.1, 5.0], [0.3, nothing])   # same answer from raw bounds
 ```
 """
@@ -29,7 +31,8 @@ function openSides(lower, upper)
     length(lower) == length(upper) || throw(DimensionMismatch(
         "lower has $(length(lower)) entries, upper has $(length(upper))"
     ))
-    return Bool[x === nothing || x === missing for (l, u) in zip(lower, upper) for x in (l, u)]
+    isOpen(x) = x === nothing || x === missing
+    return BitMatrix([isOpen(side[j]) for j in eachindex(lower), side in (lower, upper)])
 end
 
 """
@@ -52,15 +55,17 @@ A named tuple with
 - `pass` — `BitVector`, `true` where the CM param_set passes
 
 and, for [`IdentifiabilityMatchGate`](@ref),
-- `mismatch` — `BitMatrix`, `[n_cm_param_sets × n_sides]` with sides in [`openSides`](@ref)
-  order: the sides on which a CM param_set's CI shape differs from the data's
+- `mismatch` — `BitArray`, `[n_cm_param_sets × n_sm_params × 2]`: `mismatch[i, j, 1]` is `true`
+  when CM param_set `i` differs from the data on the lower side of SM parameter `j`, and
+  `mismatch[i, j, 2]` on the upper side (the layout of [`openSides`](@ref), one slice per CM
+  param_set)
 
 # Example
 ```julia
 post = buildPosterior(sm, data, uq_results, cm_params; gate = IdentifiabilityMatchGate())
 g    = applyGate(post)
 count(.!g.pass)                   # how many CM param_sets fail the gate
-vec(count(g.mismatch; dims = 1))  # failures per CI side
+dropdims(count(g.mismatch; dims = 1); dims = 1)   # failures per SM parameter (rows) and side (columns)
 post.raw_scores[post.gate_pass]   # the scores of the CM param_sets that pass
 
 applyGate(NullGate(), post).pass  # what another gate would do: here, everything passes
@@ -97,29 +102,30 @@ function gateScores(
 )
     _checkAligned(scores, uq_results)
     open_data = openSides(data_profiles)
-    open_grid = Matrix{Bool}(undef, length(uq_results), length(open_data))
+    open_grid = falses(length(uq_results), size(open_data)...)
     for (i, uq) in enumerate(uq_results)
         sides = openSides(uq)
-        length(sides) == length(open_data) || throw(DimensionMismatch(
-            "uq_results[$i] has $(length(sides) ÷ 2) SM parameters, the data profile has $(length(open_data) ÷ 2)"
+        size(sides) == size(open_data) || throw(DimensionMismatch(
+            "uq_results[$i] has $(size(sides, 1)) SM parameters, the data profile has $(size(open_data, 1))"
         ))
-        open_grid[i, :] = sides
+        open_grid[i, :, :] = sides
     end
     return _matchShapes(scores, open_grid, open_data)
 end
 
-# The identifiability-match rule on open/bounded flags: `open_grid` is [n_cm_param_sets × n_sides],
-# each row in `openSides` order; `open_data` the data's flags in the same order.
+# The identifiability-match rule on open/bounded flags: `open_data` is the data's `openSides`
+# matrix [n_sm_params × 2]; `open_grid` is [n_cm_param_sets × n_sm_params × 2], one such matrix
+# per CM param_set.
 function _matchShapes(
     scores::AbstractVector{<:Real},
-    open_grid::AbstractMatrix{Bool},
-    open_data::AbstractVector{Bool},
+    open_grid::AbstractArray{Bool,3},
+    open_data::AbstractMatrix{Bool},
 )
-    size(open_grid) == (length(scores), length(open_data)) || throw(DimensionMismatch(
-        "open_grid is $(join(size(open_grid), " × ")); expected $(length(scores)) × $(length(open_data))"
+    size(open_grid) == (length(scores), size(open_data)...) || throw(DimensionMismatch(
+        "open_grid is $(join(size(open_grid), " × ")); expected $(join((length(scores), size(open_data)...), " × "))"
     ))
-    mismatch = BitMatrix(open_grid .!= reshape(open_data, 1, :))
-    pass     = BitVector(.!vec(any(mismatch; dims = 2)))
+    mismatch = BitArray(open_grid .!= reshape(open_data, 1, size(open_data)...))
+    pass     = BitVector(.!vec(any(mismatch; dims = (2, 3))))
     gated    = Float64[pass[i] ? scores[i] : 0.0 for i in eachindex(pass)]
     return (scores = gated, pass = pass, mismatch = mismatch)
 end
@@ -137,8 +143,8 @@ Add a method for a new gate type to make interior queries work with it (see [`Ab
 
 - [`NullGate`](@ref) returns `score`.
 - [`IdentifiabilityMatchGate`](@ref) treats a side of the interpolated box as open when its
-  bound is at (or beyond) the edge of the range the CM-side profiles swept and as bounded when
-  it is strictly inside, and returns `score` if every side has the data's shape, else `0.0`.
+  bound is at (or beyond) the edge of the SM prior range and as bounded when it is strictly
+  inside, and returns `score` if every side has the data's shape, else `0.0`.
 """
 gateInterior(gate::AbstractGate, score, lb, ub, post) = throw(ArgumentError(
     "interior queries are not supported for gate $(typeof(gate)); add a method of SmoreFit.gateInterior"
@@ -147,21 +153,21 @@ gateInterior(gate::AbstractGate, score, lb, ub, post) = throw(ArgumentError(
 gateInterior(::NullGate, score, lb, ub, post) = Float64(score)
 
 function gateInterior(::IdentifiabilityMatchGate, score, lb, ub, post)
-    lo, hi    = _sweptRange(post.uq_results)
+    lo, hi    = _profileRange(post.uq_results[1])
     open_data = openSides(post.data_profiles)
     for j in eachindex(lb)
-        (lb[j] <= lo[j]) == open_data[2j - 1] || return 0.0
-        (ub[j] >= hi[j]) == open_data[2j]     || return 0.0
+        (lb[j] <= lo[j]) == open_data[j, 1] || return 0.0   # lower side: same shape as the data's?
+        (ub[j] >= hi[j]) == open_data[j, 2] || return 0.0   # upper side
     end
     return Float64(score)
 end
 
-# The range the CM-side profiles swept, per SM parameter: where `_profileBox` puts an open bound.
-function _sweptRange(uq_results)
-    k  = length(uq_results[1].profiles)
-    lo = [minimum(first(uq.profiles[j].profile_values) for uq in uq_results) for j in 1:k]
-    hi = [maximum(last(uq.profiles[j].profile_values) for uq in uq_results) for j in 1:k]
-    return lo, hi
+# The SM-parameter range a profile covers: the SM prior range, known up front. An open CI bound
+# is stored at its edge (`_profileBox`). `ProfileLikelihood(bounds = ...)` can replace the prior
+# range for the profiles; when it is set, that range is the one used.
+function _profileRange(uq::ProfileLikelihoodResult)
+    range = uq.method.bounds === nothing ? uq.fit_result.prior : uq.method.bounds
+    return SmoreBase._lowerBounds(range), SmoreBase._upperBounds(range)
 end
 
 """

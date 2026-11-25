@@ -40,7 +40,7 @@ settings (`bridge`, `box_score`, `gate`, `min_score`) and the interpolation meth
 - `uq_results` — the CM param_sets' profiles, one per row of `cm_sample.params`. Each
   `uq_results[i].method` holds the CM-side profile settings it was computed with
 - `lb_table`, `ub_table` — `[n_cm_param_sets × n_sm_params]` per-cm_param_set SM-parameter CI lower/upper bounds
-  derived from `uq_results` (with `nothing` falling back to the profile's swept-range extreme,
+  derived from `uq_results` (with `nothing` falling back to the edge of the prior range,
   matching the `:box_overlap` bridge)
 - `interp` — the `AbstractCIInterpolator` used to build `get_bounds` (stored for every layout)
 - `get_bounds` — callable `θ_cm -> (lb, ub)` interpolating the CI tables across the CM grid

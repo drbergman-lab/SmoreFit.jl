@@ -55,7 +55,7 @@ The `problem` form uses `problem.loss`; the `(sm, data, …)` form takes a `loss
 | `:data_trace_in_box` | Fraction of data profile trace points (in-CI portion) that lie inside the CM box. |
 | `:symmetric_trace` | Max of the two-way trace-in-box fractions. |
 
-A `nothing` CI bound (unidentified on that side) falls back to the profile's swept-range extreme — *not* ±Inf — so the prior still bounds the region.
+A `nothing` CI bound (unidentified on that side) falls back to the edge of the prior range — *not* ±Inf — so the prior still bounds the region.
 
 #### Box score
 
@@ -66,7 +66,7 @@ A `nothing` CI bound (unidentified on that side) falls back to the profile's swe
 | `:jaccard` *(default)* | Overlap volume ÷ volume of the union of the two boxes (Jaccard index). Symmetric; 1 only for identical boxes. |
 | `:data_normalized` | Overlap volume ÷ data-box volume. Not symmetric: a CM box containing the data box scores 1 however large it is. |
 
-The default is `:jaccard` (since v0.6; earlier versions used `:data_normalized`). The data-normalized score rewards width — an open CI stretched to the swept-range edge contains the data box and scores 1 — while Jaccard penalizes it. To reproduce pre-v0.6 scores:
+The default is `:jaccard` (since v0.6; earlier versions used `:data_normalized`). The data-normalized score rewards width — an open CI stretched to the edge of the prior range contains the data box and scores 1 — while Jaccard penalizes it. To reproduce pre-v0.6 scores:
 
 ```julia
 post = buildPosterior(sm, data, uq_results, cm_params; box_score = :data_normalized)
@@ -88,7 +88,7 @@ The bridge's own scores are `post.raw_scores`; `scoreGrid(post)` gives them on t
 
 Two filters turn raw bridge scores into an accepted set without a hand-picked threshold:
 
-- **Identifiability gate** — each side of each SM parameter's CI is either bounded or open (the profile never crossed its threshold inside the swept range). A CM param_set passes if its CI has the same shape as the data's CI on every side: bounded where the data's is bounded, open where the data's is open. A CM param_set that fails scores 0.
+- **Identifiability gate** — each side of each SM parameter's CI is either bounded or open (the profile never crossed its threshold inside the prior range). A CM param_set passes if its CI has the same shape as the data's CI on every side: bounded where the data's is bounded, open where the data's is open. A CM param_set that fails scores 0.
 - **Elbow threshold** — sort the positive scores from high to low, join the first and last with a straight line, and take the score of the point farthest below that line as τ_elbow; accept `score > τ_elbow`. Tied scores share one fate. With fewer than three positive scores, or no point below the line, τ_elbow = 0.
 
 ```julia
@@ -105,16 +105,16 @@ post.accepted     # passes the gate and scores above τ_elbow
 ```julia
 g = applyGate(post)          # the gate's result in full: (scores, pass, mismatch)
 count(.!g.pass)              # how many CM param_sets fail
-vec(count(g.mismatch; dims = 1))   # failures per CI side, in openSides order
+dropdims(count(g.mismatch; dims = 1); dims = 1)   # failures per SM parameter (rows) and side (columns)
 
 applyGate(NullGate(), post)  # special case: what a different gate would do; post is unchanged
-openSides(uq_results[1])     # [p1 lower, p1 upper, p2 lower, p2 upper, …]; true = open
+openSides(uq_results[1])     # [n_sm_params × 2]: row = SM parameter, columns = (lower, upper); true = open
 elbowThreshold(post.raw_scores[post.gate_pass])   # (tau, rank, n_positive, note)
 ```
 
 **Gates are types.** `gate` takes any `AbstractGate`; the default `NullGate()` passes everything. The gate is a type parameter of `CMPosteriorResult{I,G}`, alongside the interpolator. To add a gate, subtype `AbstractGate` and define the unexported `SmoreFit.gateScores(gate, scores, uq_results, data_profiles)`; define `SmoreFit.gateInterior(gate, score, lb, ub, post)` as well if interior queries should work with it.
 
-**Interior queries apply the same gate.** For `IdentifiabilityMatchGate`, a side of the interpolated box counts as open when its bound sits at the edge of the range the CM-side profiles swept, and as bounded when it lies strictly inside. A point interpolated only from CM param_sets that are open on a side is therefore open there; one interpolated only from bounded CM param_sets is bounded.
+**Interior queries apply the same gate.** For `IdentifiabilityMatchGate`, a side of the interpolated box counts as open when its bound sits at the edge of the SM prior range, and as bounded when it lies strictly inside. A point interpolated only from CM param_sets that are open on a side is therefore open there; one interpolated only from bounded CM param_sets is bounded.
 
 ### Interior CM-point queries
 

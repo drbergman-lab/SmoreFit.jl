@@ -9,6 +9,10 @@ _logistic(t, p, _c) = reshape(
     :, 1,
 )
 
+# Open/bounded flags written one row per CM param_set as (p1 lower, p1 upper, p2 lower, p2 upper, …),
+# rearranged to [n_cm_param_sets × n_sm_params × 2] (the layout of `openSides`, per CM param_set).
+_sideArray(flags) = cat(flags[:, 1:2:end], flags[:, 2:2:end]; dims = 3)
+
 # A user-defined gate: only the first CM param_set keeps its score.
 struct _KeepFirstGate <: AbstractGate end
 SmoreFit.gateScores(::_KeepFirstGate, scores, uq_results, data_profiles) =
@@ -429,8 +433,8 @@ SmoreFit.gateScores(::_KeepFirstGate, scores, uq_results, data_profiles) =
         uq_open = copy(uq_results)
         uq_open[2] = _openK(uq_results[2])
         uq_open[3] = _openK(uq_results[3])
-        @test openSides(uq_open[2]) == [false, false, false, true]
-        @test openSides(uq_open[4]) == [false, false, false, false]
+        @test openSides(uq_open[2]) == [false false; false true]     # rows r, K; columns lower, upper
+        @test openSides(uq_open[4]) == falses(2, 2)
 
         match = IdentifiabilityMatchGate()
         @testset "bridge = $bridge" for bridge in (:box_overlap, :data_trace_in_box, :symmetric_trace)
@@ -440,7 +444,7 @@ SmoreFit.gateScores(::_KeepFirstGate, scores, uq_results, data_profiles) =
             @test gated.gate === match
             @test raw isa CMPosteriorResult{LinearCIInterp,NullGate}
             @test gated isa CMPosteriorResult{LinearCIInterp,IdentifiabilityMatchGate}
-            @test openSides(raw.data_profiles) == falses(4)
+            @test openSides(raw.data_profiles) == falses(2, 2)
             @test raw.raw_scores[3] > 0                   # the gate, not the bridge, removes it
 
             # The posterior keeps the bridge's scores and records who passes.
@@ -464,7 +468,8 @@ SmoreFit.gateScores(::_KeepFirstGate, scores, uq_results, data_profiles) =
             g = applyGate(gated)
             @test g.scores == expected
             @test g.pass == gated.gate_pass
-            @test g.mismatch[2, :] == [false, false, false, true]
+            @test g.mismatch[2, :, :] == [false false; false true]
+            @test size(g.mismatch) == (5, 2, 2)
             n = applyGate(raw)
             @test n.scores == raw.raw_scores
             @test all(n.pass)
@@ -545,30 +550,33 @@ end
 
 @testset "identifiability-match rule on CI shapes" begin
     scores    = [0.9, 0.5, 0.3, 0.0, 0.7]
-    open_data = [false, false, false, true]              # K open above
-    open_grid = Bool[
+    open_data = [false false; false true]                # rows r, K; columns lower, upper: K open above
+    flags = Bool[                                        # r_lo r_hi K_lo K_hi, one row per CM param_set
         0 0 0 1      # same shape → pass
         0 0 0 0      # bounded where the data's is open → fail
         1 0 0 1      # open where the data's is bounded → fail
         0 0 0 1      # pass (score already 0)
         0 1 0 0      # two sides differ → fail
     ]
+    open_grid = _sideArray(flags)                        # [5 × 2 × 2]
     g = SmoreFit._matchShapes(scores, open_grid, open_data)
     @test g.scores == [0.9, 0.0, 0.0, 0.0, 0.0]
     @test g.scores isa Vector{Float64}
     @test g.pass == [true, false, false, true, false]
-    @test g.mismatch == Bool[0 0 0 0; 0 0 0 1; 1 0 0 0; 0 0 0 0; 0 1 0 1]
+    @test g.mismatch == _sideArray(Bool[0 0 0 0; 0 0 0 1; 1 0 0 0; 0 0 0 0; 0 1 0 1])
+    @test g.mismatch[5, 1, 2] && g.mismatch[5, 2, 2]     # CM param_set 5: r upper and K upper differ
     @test scores == [0.9, 0.5, 0.3, 0.0, 0.7]            # input untouched
 
     # integer scores and BitArray flags
-    gi = SmoreFit._matchShapes([1, 2], BitMatrix([0 0; 0 1]), BitVector([0, 0]))
+    gi = SmoreFit._matchShapes([1, 2], _sideArray(BitMatrix([0 0; 0 1])), falses(1, 2))
     @test gi.scores == [1.0, 0.0]
 
-    @test_throws DimensionMismatch SmoreFit._matchShapes(scores, open_grid[1:4, :], open_data)
-    @test_throws DimensionMismatch SmoreFit._matchShapes(scores, open_grid, open_data[1:2])
+    @test_throws DimensionMismatch SmoreFit._matchShapes(scores, open_grid[1:4, :, :], open_data)
+    @test_throws DimensionMismatch SmoreFit._matchShapes(scores, open_grid, open_data[1:1, :])
 
-    @test openSides([0.1, 5.0], [0.3, nothing]) == [false, false, false, true]
-    @test openSides([missing, 5.0], [0.3, 9.0]) == [true, false, false, false]
+    @test openSides([0.1, 5.0], [0.3, nothing]) == [false false; false true]
+    @test openSides([0.1, 5.0], [0.3, nothing]) isa BitMatrix
+    @test openSides([missing, 5.0], [0.3, 9.0]) == [true false; false false]
     @test_throws DimensionMismatch openSides([0.1], [0.3, 1.0])
 end
 
@@ -607,7 +615,7 @@ end
 # Gate, then elbow, on a 3 × 4 CM grid (12 CM param_sets), with every number worked by hand.
 # The data's CI is bounded in r and open above in K: [false, false, false, true].
 @testset "gate + elbow on a 3 × 4 grid" begin
-    open_data = [false, false, false, true]
+    open_data = [false false; false true]
     #             score  r_lo   r_hi   K_lo   K_hi
     grid = [
         (0.90, false, false, false, true),    #  1  pass
@@ -624,13 +632,13 @@ end
         (0.02, false, false, false, true),    # 12  pass
     ]
     scores    = [g[1] for g in grid]
-    open_grid = [g[c] for g in grid, c in 2:5]
+    open_grid = _sideArray([g[c] for g in grid, c in 2:5])     # [12 × 2 × 2]
     reference = BitVector([1, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0])      # a "true" set, for the Jaccard index
     jaccard(a, b) = count(a .& b) / count(a .| b)
 
     g = SmoreFit._matchShapes(scores, open_grid, open_data)
     @test findall(.!g.pass) == [3, 6, 11]
-    @test g.mismatch[11, :] == [false, true, false, true]
+    @test g.mismatch[11, :, :] == [false true; false true]      # r upper and K upper
     @test g.scores == [0.90, 0.80, 0.0, 0.70, 0.10, 0.0, 0.08, 0.05, 0.0, 0.04, 0.0, 0.02]
 
     # Stage 1, no filter: 11 positive raw scores. Stage 2, gate only: 8.

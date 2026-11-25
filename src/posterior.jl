@@ -48,7 +48,7 @@ wrapped with `CMSample` (from SmoreBase: grid if possible, else scattered).
   data box (ignored by the trace bridges):
   - `:jaccard` — overlap volume ÷ volume of the union of the two boxes (the Jaccard index).
     Symmetric, and 1 only for identical boxes, so a wide CM box (e.g. an open CI stretched to
-    the swept-range edge) is penalized for its width.
+    the edge of the prior range) is penalized for its width.
   - `:data_normalized` — overlap volume ÷ data-box volume (the default before v0.6). Not
     symmetric: a CM box that contains the data box scores 1.0 however large it is.
   Any other value throws `ArgumentError`.
@@ -139,7 +139,7 @@ function buildPosterior(
     accepted  = gate_pass .& (scores .> threshold)
 
     # Per-cm_param_set SM-parameter CI tables, used both to build the grid bounds interpolant for
-    # interior queries and stored for later inspection / re-analysis. Uses the same swept-edge
+    # interior queries and stored for later inspection / re-analysis. Uses the same prior-edge
     # fallback for `nothing` CI bounds as the `:box_overlap` bridge does internally.
     n_sm      = length(uq_results[1].profiles)
     lb_table  = Matrix{Float64}(undef, n_ps, n_sm)

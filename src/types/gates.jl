@@ -48,7 +48,7 @@ open where the data's is open. A CM param_set that fails counts as score 0.
 The gate uses only the CI shapes, never the scores, so it is the same for every bridge.
 
 At an interior CM point the CI shape is read off the interpolated box: a side is open if the
-interpolated bound sits at the edge of the range the CM-side profiles swept, and bounded if it
+interpolated bound sits at the edge of the SM prior range, and bounded if it
 lies strictly inside. So a point interpolated only from CM param_sets that are open on a side
 is open there, and one interpolated only from bounded CM param_sets is bounded.
 """
