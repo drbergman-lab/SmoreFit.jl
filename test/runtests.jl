@@ -9,6 +9,15 @@ _logistic(t, p, _c) = reshape(
     :, 1,
 )
 
+# Open/bounded flags written one row per CM param_set as (p1 lower, p1 upper, p2 lower, p2 upper, …),
+# rearranged to [n_cm_param_sets × n_sm_params × 2] (the layout of `openSides`, per CM param_set).
+_sideArray(flags) = cat(flags[:, 1:2:end], flags[:, 2:2:end]; dims = 3)
+
+# A user-defined gate: only the first CM param_set keeps its score.
+struct _KeepFirstGate <: AbstractGate end
+SmoreFit.gateScores(::_KeepFirstGate, scores, uq_results, data_profiles) =
+    (scores = [i == 1 ? Float64(scores[i]) : 0.0 for i in eachindex(scores)], pass = BitVector(eachindex(scores) .== 1))
+
 @testset "buildPosterior" begin
     sm       = CustomSurrogateModel(fn = _logistic)
     t        = collect(0.0:5.0:50.0)                      # saturates → r and K identifiable
@@ -408,6 +417,150 @@ _logistic(t, p, _c) = reshape(
         @test post.scores[2] == 0.0
     end
 
+    @testset "buildPosterior gate and min_score = :elbow" begin
+        # K's upper CI side opened on cm_param_sets 2 and 3: they fail the gate (the data's CI is
+        # bounded everywhere), whatever their score
+        # (cm_param_set 3 is the generating one and scores highest).
+        _openK(uq) = let
+            pcs = map(uq.profiles) do pc
+                pc.parameter_name == "K" || return pc
+                ProfileCurve(pc.parameter_index, pc.parameter_name, pc.profile_values,
+                    pc.log_likelihoods, pc.optimal_parameters, pc.ci_lower, nothing,
+                    pc.threshold, pc.reference_ll)
+            end
+            ProfileLikelihoodResult{Float64}(pcs, uq.fit_result, uq.times, uq.method)
+        end
+        uq_open = copy(uq_results)
+        uq_open[2] = _openK(uq_results[2])
+        uq_open[3] = _openK(uq_results[3])
+        @test openSides(uq_open[2]) == [false false; false true]     # rows r, K; columns lower, upper
+        @test openSides(uq_open[4]) == falses(2, 2)
+
+        match = IdentifiabilityMatchGate()
+        @testset "bridge = $bridge" for bridge in (:box_overlap, :data_trace_in_box, :symmetric_trace)
+            raw   = buildPosterior(sm, data, uq_open, cm_params; bridge = bridge)
+            gated = buildPosterior(sm, data, uq_open, cm_params; bridge = bridge, gate = match)
+            @test raw.gate === NullGate()
+            @test gated.gate === match
+            @test raw isa CMPosteriorResult{LinearCIInterp,NullGate}
+            @test gated isa CMPosteriorResult{LinearCIInterp,IdentifiabilityMatchGate}
+            @test openSides(raw.data_profiles) == falses(2, 2)
+            @test raw.scores[3] > 0                   # the gate, not the bridge, removes it
+
+            # The posterior keeps the bridge's scores and records who passes.
+            @test gated.scores == raw.scores
+            @test gated.gate_pass == [true, false, false, true, true]
+            @test all(raw.gate_pass)
+            expected = [raw.scores[1], 0.0, 0.0, raw.scores[4], raw.scores[5]]
+            @test gated.scores[gated.gate_pass] == raw.scores[[1, 4, 5]]
+
+            # Everything aligned with the CM grid treats a failing cm_param_set as score 0.
+            @test scoreGrid(gated) == expected
+            @test gated.accepted == (expected .> 0)
+            @test !any(gated.accepted[.!gated.gate_pass])
+            @test posteriorSamples(gated) == cm_params[gated.accepted, :]
+            w = posteriorWeights(gated)
+            @test w[2] == 0.0 && w[3] == 0.0
+            @test sum(expected) == 0 ? all(iszero, w) : w ≈ expected ./ sum(expected)
+            @test scoreGrid(raw) == raw.scores
+
+            # applyGate(post): the stored gate's result, in full.
+            g = applyGate(gated)
+            @test g.scores == expected
+            @test g.pass == gated.gate_pass
+            @test g.mismatch[2, :, :] == [false false; false true]
+            @test size(g.mismatch) == (5, 2, 2)
+            n = applyGate(raw)
+            @test n.scores == raw.scores
+            @test all(n.pass)
+            @test !haskey(n, :mismatch)
+
+            # applyGate(gate, post): another gate on the same raw scores; post is not changed.
+            @test applyGate(match, raw) == g
+            @test raw.gate === NullGate() && all(raw.gate_pass)
+            @test applyGate(NullGate(), gated).scores == gated.scores
+            @test gated.gate_pass == [true, false, false, true, true]
+
+            # min_score = :elbow: τ_elbow of the scores that pass the gate, stored on the result.
+            el = buildPosterior(sm, data, uq_open, cm_params; bridge = bridge, gate = match, min_score = :elbow)
+            @test el.scores == raw.scores
+            @test el.gate_pass == gated.gate_pass
+            @test el.min_score == elbowThreshold(el.scores[el.gate_pass]).tau
+            @test el.min_score == elbowThreshold(expected).tau
+            @test el.accepted == el.gate_pass .& (el.scores .> el.min_score)
+            el_raw = buildPosterior(sm, data, uq_open, cm_params; bridge = bridge, min_score = :elbow)
+            @test el_raw.min_score == elbowThreshold(raw.scores).tau
+            @test el_raw.scores == raw.scores
+        end
+
+        @testset "interior queries apply the gate: $bridge" for bridge in (:box_overlap, :data_trace_in_box)
+            raw   = buildPosterior(sm, data, uq_open, cm_params; bridge = bridge)
+            gated = buildPosterior(sm, data, uq_open, cm_params; bridge = bridge, gate = match)
+            # At the sampled CM points an interior query reproduces the stored (gated) score.
+            for (k, c) in enumerate(cvals)
+                @test posteriorScore(gated, [c]) == scoreGrid(gated)[k]
+            end
+            # Between two CM param_sets that are open in K above (2 and 3): the interpolated
+            # upper bound is at the edge of the swept range → open → fails (data is bounded).
+            @test posteriorScore(raw, [2.999]) > 0
+            @test posteriorScore(gated, [2.999]) == 0.0
+            @test !inPosterior(gated, [2.999])
+            # Between an open (3) and a bounded (4) CM param_set: the interpolated bound is
+            # strictly inside the swept range → bounded → passes, score as without the gate.
+            bridge === :box_overlap && @test posteriorScore(raw, [3.001]) > 0
+            @test posteriorScore(gated, [3.001]) == posteriorScore(raw, [3.001])
+            # Between two bounded CM param_sets (4 and 5): unchanged.
+            @test posteriorScore(gated, [4.5]) == posteriorScore(raw, [4.5])
+            # Batch form
+            @test posteriorScore(gated, reshape([2.999, 3.001, 4.5], :, 1)) ==
+                  [0.0, posteriorScore(raw, [3.001]), posteriorScore(raw, [4.5])]
+        end
+
+        @testset "profile range: the prior range, or ProfileLikelihood's bounds" begin
+            # Without `bounds` the profile range is the SM prior range.
+            @test SmoreFit._profileRange(uq_results[1]) == ([0.01, 0.5], [2.0, 10.0])
+
+            # Profiles run with `bounds` narrower than the prior in K (upper edge 6 instead of 10).
+            narrow = ParameterPrior([0.01, 0.5], [2.0, 6.0]; names = ["r", "K"])
+            opts   = ProfileLikelihood(n_points = 12, bounds = narrow)
+            uq_b   = map(cvals) do c
+                d    = CMData(μ = vec(_logistic(t, [rtrue(c), Ktrue], nothing)), σ = noise .* ones(length(t)), times = t)
+                prob = SMFitProblem(sm, d, sm_prior)
+                quantifyUncertainty(opts, prob, fitSurrogate(prob, P0), 1)
+            end
+            @test SmoreFit._profileRange(uq_b[1]) == ([0.01, 0.5], [2.0, 6.0])
+            uq_b[2] = _openK(uq_b[2]); uq_b[3] = _openK(uq_b[3])
+
+            raw   = buildPosterior(sm, data, uq_b, cm_params)
+            gated = buildPosterior(sm, data, uq_b, cm_params; gate = match)
+            # An open side is stored at the edge of `bounds`, not of the prior.
+            @test gated.ub_table[3, 2] == 6.0
+            @test gated.gate_pass == [true, false, false, true, true]
+            # Interior gating compares against that edge: between the two open CM param_sets the
+            # interpolated K upper bound is 6.0 → open → fails; next to a bounded one it passes.
+            @test posteriorScore(raw, [2.999]) > 0
+            @test posteriorScore(gated, [2.999]) == 0.0
+            @test posteriorScore(gated, [3.001]) == posteriorScore(raw, [3.001])
+            for (k, c) in enumerate(cvals)
+                @test posteriorScore(gated, [c]) == scoreGrid(gated)[k]
+            end
+        end
+
+        # A gate with no interior method: grid scores work, interior queries say why they cannot.
+        post_custom = buildPosterior(sm, data, uq_results, cm_params; gate = _KeepFirstGate())
+        @test post_custom.gate_pass == [true, false, false, false, false]
+        @test scoreGrid(post_custom)[2:end] == zeros(4)
+        @test applyGate(post_custom).pass == post_custom.gate_pass
+        @test post_custom isa CMPosteriorResult{LinearCIInterp,_KeepFirstGate}
+        @test_throws ArgumentError posteriorScore(post_custom, [2.5])
+
+        # defaults are unchanged
+        post = buildPosterior(sm, data, uq_results, cm_params)
+        @test post.gate === NullGate()
+        @test post.min_score == 0.0
+        @test_throws ArgumentError buildPosterior(sm, data, uq_results, cm_params; min_score = :knee)
+    end
+
     @testset "validation" begin
         # data must have a single param set
         bad = CMData(μ = rand(length(t), 2), σ = ones(length(t), 2), times = t, cm_param_sets = 2)
@@ -423,4 +576,120 @@ _logistic(t, p, _c) = reshape(
         @test_throws ArgumentError buildPosterior(sm, data, uq_results, cm_params; box_score = :union)
         @test_throws ArgumentError buildPosterior(sm, data, uq_results, cm_params; bridge = :data_trace_in_box, box_score = :union)
     end
+end
+
+@testset "identifiability-match rule on CI shapes" begin
+    scores    = [0.9, 0.5, 0.3, 0.0, 0.7]
+    open_data = [false false; false true]                # rows r, K; columns lower, upper: K open above
+    flags = Bool[                                        # r_lo r_hi K_lo K_hi, one row per CM param_set
+        0 0 0 1      # same shape → pass
+        0 0 0 0      # bounded where the data's is open → fail
+        1 0 0 1      # open where the data's is bounded → fail
+        0 0 0 1      # pass (score already 0)
+        0 1 0 0      # two sides differ → fail
+    ]
+    open_grid = _sideArray(flags)                        # [5 × 2 × 2]
+    g = SmoreFit._matchShapes(scores, open_grid, open_data)
+    @test g.scores == [0.9, 0.0, 0.0, 0.0, 0.0]
+    @test g.scores isa Vector{Float64}
+    @test g.pass == [true, false, false, true, false]
+    @test g.mismatch == _sideArray(Bool[0 0 0 0; 0 0 0 1; 1 0 0 0; 0 0 0 0; 0 1 0 1])
+    @test g.mismatch[5, 1, 2] && g.mismatch[5, 2, 2]     # CM param_set 5: r upper and K upper differ
+    @test scores == [0.9, 0.5, 0.3, 0.0, 0.7]            # input untouched
+
+    # integer scores and BitArray flags
+    gi = SmoreFit._matchShapes([1, 2], _sideArray(BitMatrix([0 0; 0 1])), falses(1, 2))
+    @test gi.scores == [1.0, 0.0]
+
+    @test_throws DimensionMismatch SmoreFit._matchShapes(scores, open_grid[1:4, :, :], open_data)
+    @test_throws DimensionMismatch SmoreFit._matchShapes(scores, open_grid, open_data[1:1, :])
+
+    @test openSides([0.1, 5.0], [0.3, nothing]) == [false false; false true]
+    @test openSides([0.1, 5.0], [0.3, nothing]) isa BitMatrix
+    @test openSides([missing, 5.0], [0.3, 9.0]) == [true false; false false]
+    @test_throws DimensionMismatch openSides([0.1], [0.3, 1.0])
+end
+
+@testset "elbowThreshold" begin
+    # A sharp elbow: the point farthest below the line from (rank 1, 1.0) to (rank 6, 0.01).
+    e = elbowThreshold([0.02, 1.0, 0.0, 0.9, 0.05, 0.01, 0.0, 0.8])
+    @test e.tau == 0.05
+    @test e.rank == 4
+    @test e.n_positive == 6
+    @test e.note == ""
+
+    # Order and non-positive scores do not matter.
+    @test elbowThreshold([0.8, -1.0, 0.01, 0.05, 0.9, 0.02, 1.0]).tau == 0.05
+
+    # Tied scores share one fate: τ is a score value and acceptance is strict.
+    s = [1.0, 0.9, 0.1, 0.1, 0.1, 0.05]
+    et = elbowThreshold(s)
+    @test et.tau == 0.1
+    @test count(s .> et.tau) == 2
+
+    # τ_elbow = 0: fewer than three positive scores, all equal, or nothing below the line.
+    for s0 in (Float64[], [0.0, 0.0], [0.4], [0.4, 0.2, 0.0])
+        e0 = elbowThreshold(s0)
+        @test e0.tau == 0.0 && e0.rank == 0
+        @test e0.note == "fewer than three positive scores"
+        @test e0.n_positive == count(>(0), s0)
+    end
+    @test elbowThreshold([0.3, 0.3, 0.3]).note == "no point below the line (all positive scores equal)"
+    @test elbowThreshold([0.3, 0.3, 0.3]).tau == 0.0
+    concave = elbowThreshold([1.0, 0.95, 0.9, 0.1])      # every interior point above the line
+    @test concave.tau == 0.0
+    @test concave.note == "no point below the line"
+    @test elbowThreshold([3, 2, 1]).tau === 0.0          # on the line; integer input
+end
+
+# Gate, then elbow, on a 3 × 4 CM grid (12 CM param_sets), with every number worked by hand.
+# The data's CI is bounded in r and open above in K: [false, false, false, true].
+@testset "gate + elbow on a 3 × 4 grid" begin
+    open_data = [false false; false true]
+    #             score  r_lo   r_hi   K_lo   K_hi
+    grid = [
+        (0.90, false, false, false, true),    #  1  pass
+        (0.80, false, false, false, true),    #  2  pass
+        (0.85, false, false, false, false),   #  3  K bounded above → fail
+        (0.70, false, false, false, true),    #  4  pass
+        (0.10, false, false, false, true),    #  5  pass  ← elbow
+        (0.60, true,  false, false, true),    #  6  r open below → fail
+        (0.08, false, false, false, true),    #  7  pass
+        (0.05, false, false, false, true),    #  8  pass
+        (0.00, false, false, false, true),    #  9  pass, score 0
+        (0.04, false, false, false, true),    # 10  pass
+        (0.30, false, true,  false, false),   # 11  two sides differ → fail
+        (0.02, false, false, false, true),    # 12  pass
+    ]
+    scores    = [g[1] for g in grid]
+    open_grid = _sideArray([g[c] for g in grid, c in 2:5])     # [12 × 2 × 2]
+    reference = BitVector([1, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0])      # a "true" set, for the Jaccard index
+    jaccard(a, b) = count(a .& b) / count(a .| b)
+
+    g = SmoreFit._matchShapes(scores, open_grid, open_data)
+    @test findall(.!g.pass) == [3, 6, 11]
+    @test g.mismatch[11, :, :] == [false true; false true]      # r upper and K upper
+    @test g.scores == [0.90, 0.80, 0.0, 0.70, 0.10, 0.0, 0.08, 0.05, 0.0, 0.04, 0.0, 0.02]
+
+    # Stage 1, no filter: 11 positive raw scores. Stage 2, gate only: 8.
+    @test count(>(0), scores) == 11
+    @test count(>(0), g.scores) == 8
+    @test jaccard(scores .> 0, reference) ≈ 3 / 11
+    @test jaccard(g.scores .> 0, reference) ≈ 3 / 8
+
+    # Stage 3, gate + elbow. Sorted passing scores: 0.90 0.80 0.70 0.10 0.08 0.05 0.04 0.02;
+    # the point farthest below the line from (1, 0.90) to (8, 0.02) is rank 4, score 0.10.
+    e = elbowThreshold(scores[g.pass])
+    @test e == elbowThreshold(g.scores)             # a failing CM param_set counts as score 0
+    @test e.tau == 0.10
+    @test e.rank == 4
+    @test e.n_positive == 8
+    accepted = g.pass .& (scores .> e.tau)
+    @test findall(accepted) == [1, 2, 4]
+    @test jaccard(accepted, reference) == 1.0
+
+    # Without the gate the elbow lands elsewhere and keeps two CM param_sets the gate removes.
+    e_raw = elbowThreshold(scores)
+    @test e_raw.tau == 0.10
+    @test findall(scores .> e_raw.tau) == [1, 2, 3, 4, 6, 11]
 end

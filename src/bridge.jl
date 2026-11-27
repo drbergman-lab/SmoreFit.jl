@@ -7,8 +7,8 @@
 # from the marginal χ²(1) CIs, or as the union of profile trace points within those CIs.
 
 # Hyperrectangle (per-parameter marginal CI) for a profile likelihood result.
-# A `nothing` CI bound (parameter unidentified on that side) falls back to the swept-range
-# extreme — the SM prior/sweep edge — rather than ±Inf, so the prior still bounds the region.
+# A `nothing` CI bound (parameter unidentified on that side) falls back to the edge of
+# the profile's range — the SM prior range — rather than ±Inf, so the prior still bounds the region.
 function _profileBox(plr::ProfileLikelihoodResult)
     k  = length(plr.profiles)
     lo = Vector{Float64}(undef, k)

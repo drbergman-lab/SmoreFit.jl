@@ -48,7 +48,7 @@ wrapped with `CMSample` (from SmoreBase: grid if possible, else scattered).
   data box (ignored by the trace bridges):
   - `:jaccard` — overlap volume ÷ volume of the union of the two boxes (the Jaccard index).
     Symmetric, and 1 only for identical boxes, so a wide CM box (e.g. an open CI stretched to
-    the swept-range edge) is penalized for its width.
+    the edge of the prior range) is penalized for its width.
   - `:data_normalized` — overlap volume ÷ data-box volume (the default before v0.6). Not
     symmetric: a CM box that contains the data box scores 1.0 however large it is.
   Any other value throws `ArgumentError`.
@@ -59,8 +59,16 @@ wrapped with `CMSample` (from SmoreBase: grid if possible, else scattered).
   column-mean of the CM param_sets' SM fits
 - `loss::AbstractLoss = GaussianNLL()` — loss for the **data** fit, *only on the
   `(sm, data, …)` forms*; the problem form uses `problem.loss`
-- `min_score::Real = 0.0` — a cm_param_set is accepted iff its score exceeds this; also
-  the default threshold for [`inPosterior`](@ref) interior queries
+- `gate::AbstractGate = NullGate()` — the posterior's gate, chosen here once and stored as
+  `post.gate`. A cm_param_set that fails it counts as score 0 and is never accepted;
+  [`IdentifiabilityMatchGate`](@ref) fails every cm_param_set whose CI shape (bounded or open,
+  per SM parameter and side) differs from the data's. `post.scores` keeps the bridge's
+  scores and `post.gate_pass` records who passes; interior queries apply the same gate
+- `min_score::Union{Real,Symbol} = 0.0` — a cm_param_set is accepted iff it passes the gate
+  and its score exceeds this; also the default threshold for [`inPosterior`](@ref) interior
+  queries. `:elbow` sets it to τ_elbow, the [`elbowThreshold`](@ref) of the scores that pass
+  the gate; the value used is stored as `post.min_score`. Any other symbol throws
+  `ArgumentError`
 - `interp::AbstractCIInterpolator = LinearCIInterp()` — how the per-cm_param_set SM-parameter CI
   bounds are interpolated across the CM grid for interior queries; only consulted when
   `cm_sample isa GridCMSample` (interior queries are not built for scattered layouts);
@@ -80,6 +88,10 @@ post    = buildPosterior(problem, uq_results, cm_params; bridge = :box_overlap)
 # Otherwise, pass sm and the real data directly:
 post = buildPosterior(sm, data, uq_results, cm_params)
 
+# Identifiability gate, then the elbow threshold on the scores that pass it:
+post = buildPosterior(sm, data, uq_results, cm_params;
+                      gate = IdentifiabilityMatchGate(), min_score = :elbow)
+
 posteriorSamples(post)   # CM parameter vectors consistent with the data
 ```
 """
@@ -92,7 +104,8 @@ function buildPosterior(
     box_score::Symbol = :jaccard,
     profile_options::ProfileLikelihood = ProfileLikelihood(),
     p0 = nothing,
-    min_score::Real = 0.0,
+    gate::AbstractGate = NullGate(),
+    min_score::Union{Real,Symbol} = 0.0,
     interp::AbstractCIInterpolator = LinearCIInterp(),
 )
     n_cm_param_sets(problem.data) == 1 || throw(ArgumentError(
@@ -110,15 +123,23 @@ function buildPosterior(
         "unknown bridge :$bridge; expected :box_overlap, :data_trace_in_box, or :symmetric_trace"
     ))
     _validateBoxScore(box_score)
+    min_score isa Symbol && min_score !== :elbow && throw(ArgumentError(
+        "unknown min_score :$min_score; expected a number or :elbow"
+    ))
 
     p0_eff   = p0 === nothing ? _meanCmParamSetMLE(uq_results) : p0
     data_plr = _profileAgainstData(problem, p0_eff, profile_options)
 
     scores   = Float64[_consistency(uq, data_plr, bridge, box_score) for uq in uq_results]
-    accepted = BitVector(scores .> min_score)
+    gate_pass = BitVector(gateScores(gate, scores, uq_results, data_plr).pass)
+    length(gate_pass) == n_ps || throw(DimensionMismatch(
+        "gateScores for $(typeof(gate)) returned $(length(gate_pass)) pass flags for $n_ps cm_param_sets"
+    ))
+    threshold = min_score === :elbow ? elbowThreshold(scores[gate_pass]).tau : Float64(min_score)
+    accepted  = gate_pass .& (scores .> threshold)
 
     # Per-cm_param_set SM-parameter CI tables, used both to build the grid bounds interpolant for
-    # interior queries and stored for later inspection / re-analysis. Uses the same swept-edge
+    # interior queries and stored for later inspection / re-analysis. Uses the same prior-edge
     # fallback for `nothing` CI bounds as the `:box_overlap` bridge does internally.
     n_sm      = length(uq_results[1].profiles)
     lb_table  = Matrix{Float64}(undef, n_ps, n_sm)
@@ -139,9 +160,9 @@ function buildPosterior(
 
     return CMPosteriorResult(
         cm_sample, cm_names, accepted, scores, bridge,
-        Float64(min_score), problem, data_plr,
+        threshold, problem, data_plr,
         Vector{ProfileLikelihoodResult}(uq_results), lb_table, ub_table, interp, get_bounds,
-        box_score,
+        box_score, gate, gate_pass,
     )
 end
 

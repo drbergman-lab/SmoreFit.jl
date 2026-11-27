@@ -4,8 +4,8 @@
 Result of [`buildPosterior`](@ref): which CM param_sets are consistent with the
 real-world data, scored by the chosen bridge method.
 
-Both a hard accept/reject set (`accepted`) and the continuous `scores` are always stored; which
-one to use is a choice made at read time via [`posteriorSamples`](@ref) (accept/reject) or
+Both a hard accept/reject set (`accepted`) and the continuous `scores` are always stored,
+together with which CM param_sets pass the gate (`gate_pass`); which view to use is a choice made at read time via [`posteriorSamples`](@ref) (accept/reject) or
 [`posteriorWeights`](@ref) (graded). Because `cm_sample` is retained (with its grid `axes` for a
 `GridCMSample`), acceptance and scores can be reshaped back onto the CM grid via
 [`acceptedGrid`](@ref) / [`scoreGrid`](@ref).
@@ -17,15 +17,19 @@ among the cm_param_sets) can be queried via [`inPosterior`](@ref) and [`posterio
 
 The result also records what built it: the data-side problem (`data_problem`), both sides'
 profile settings (`data_profiles.method` and each `uq_results[i].method`), the bridge
-settings (`bridge`, `box_score`, `min_score`) and the interpolation method (`interp`).
+settings (`bridge`, `box_score`, `gate`, `min_score`) and the interpolation method (`interp`).
 
 # Fields
-- `cm_sample` — CM parameter points (`AbstractCMSample`), row-aligned with `accepted`/`scores`
+- `cm_sample` — CM parameter points (`AbstractCMSample`), row-aligned with `accepted`/`scores`/`gate_pass`
 - `cm_names` — CM parameter names (defaults from `cm_sample.names`; override via `buildPosterior`'s `cm_names` kwarg)
-- `accepted` — `BitVector`; `true` where the cm_param_set's consistency score exceeds `min_score`
-- `scores` — consistency score per cm_param_set, in `[0, 1]`
+- `accepted` — `BitVector`; `true` where the cm_param_set passes the gate and its score exceeds
+  `min_score`: `gate_pass .& (scores .> min_score)`
+- `scores` — the bridge's consistency score per cm_param_set, in `[0, 1]`. A cm_param_set that
+  fails the gate is treated as score 0 wherever a score is used ([`scoreGrid`](@ref),
+  [`posteriorWeights`](@ref), `accepted`, the elbow); `gate_pass` says which ones those are
 - `bridge` — the bridge method used (`:box_overlap`, `:data_trace_in_box`, `:symmetric_trace`)
-- `min_score` — threshold used for `accepted`; default for interior queries
+- `min_score` — threshold used for `accepted`; default for interior queries. When
+  `buildPosterior` was called with `min_score = :elbow`, this is the resulting τ_elbow
 - `data_problem` — the `SMFitProblem` (`sm`, real `data`, SM `prior`, `loss`) that the SM was
   fitted and profiled against on the data side; for the `(sm, data, …)` methods, the problem
   they build internally
@@ -35,7 +39,7 @@ settings (`bridge`, `box_score`, `min_score`) and the interpolation method (`int
 - `uq_results` — the CM param_sets' profiles, one per row of `cm_sample.params`. Each
   `uq_results[i].method` holds the CM-side profile settings it was computed with
 - `lb_table`, `ub_table` — `[n_cm_param_sets × n_sm_params]` per-cm_param_set SM-parameter CI lower/upper bounds
-  derived from `uq_results` (with `nothing` falling back to the profile's swept-range extreme,
+  derived from `uq_results` (with `nothing` falling back to the edge of the prior range,
   matching the `:box_overlap` bridge)
 - `interp` — the `AbstractCIInterpolator` used to build `get_bounds` (stored for every layout)
 - `get_bounds` — callable `θ_cm -> (lb, ub)` interpolating the CI tables across the CM grid
@@ -46,6 +50,14 @@ settings (`bridge`, `box_score`, `min_score`) and the interpolation method (`int
   `buildPosterior`: `:jaccard` (overlap volume ÷ union volume; the default) or
   `:data_normalized` (overlap volume ÷ data-box volume). Interior queries reuse it, so they
   reproduce the stored `scores`. Recorded for every bridge but only consulted by `:box_overlap`.
+- `gate` — the [`AbstractGate`](@ref) of this posterior ([`NullGate`](@ref) when none was
+  asked for). It is chosen once, in `buildPosterior`; interior queries
+  ([`posteriorScore`](@ref), [`inPosterior`](@ref)) and [`applyGate`](@ref) use it
+- `gate_pass` — `BitVector`; `true` where the cm_param_set passes `gate` (all `true` under
+  [`NullGate`](@ref))
+
+The interpolator and the gate are type parameters: `CMPosteriorResult{I,G}` with
+`I <: AbstractCIInterpolator` and `G <: AbstractGate`.
 
 The data-side SM-parameter box and trace that the bridges compared against are not stored;
 they are `SmoreFit._profileBox(post.data_profiles)` and `SmoreFit._profileTrace(post.data_profiles)`.
@@ -54,11 +66,11 @@ they are `SmoreFit._profileBox(post.data_profiles)` and `SmoreFit._profileTrace(
 [`posteriorSamples`](@ref), [`posteriorWeights`](@ref), [`acceptedGrid`](@ref),
 [`scoreGrid`](@ref), [`inPosterior`](@ref), [`posteriorScore`](@ref).
 """
-struct CMPosteriorResult
+struct CMPosteriorResult{I<:AbstractCIInterpolator,G<:AbstractGate}
     cm_sample      :: AbstractCMSample
     cm_names       :: Vector{String}
     accepted       :: BitVector
-    scores         :: Vector{Float64}
+    scores     :: Vector{Float64}
     bridge         :: Symbol
     min_score      :: Float64
     data_problem   :: SMFitProblem
@@ -66,10 +78,16 @@ struct CMPosteriorResult
     uq_results     :: Vector{ProfileLikelihoodResult}
     lb_table       :: Matrix{Float64}
     ub_table       :: Matrix{Float64}
-    interp         :: AbstractCIInterpolator
+    interp         :: I
     get_bounds     :: Union{Nothing,Function}
     box_score      :: Symbol
+    gate           :: G
+    gate_pass      :: BitVector
 end
+
+# Scores aligned with the CM param_sets, with 0 where a CM param_set fails the gate. Internal:
+# everything that needs one score per CM param_set goes through this.
+_gatedScores(r::CMPosteriorResult) = ifelse.(r.gate_pass, r.scores, 0.0)
 
 """
     posteriorSamples(r::CMPosteriorResult) -> Matrix
@@ -89,7 +107,8 @@ posteriorSamples(r::CMPosteriorResult) = r.cm_sample.params[r.accepted, :]
     posteriorWeights(r::CMPosteriorResult) -> Vector{Float64}
 
 Consistency scores normalized to sum to one — a simple graded posterior (discrete
-distribution) over the CM param_sets. All-zero if no CM param_set is consistent.
+distribution) over the CM param_sets. A CM param_set that fails the gate has weight 0. All-zero
+if no CM param_set is consistent.
 
 # Example
 ```julia
@@ -98,9 +117,10 @@ w    = posteriorWeights(post)   # weight per cm_param_set, sums to 1
 ```
 """
 function posteriorWeights(r::CMPosteriorResult)
-    s = sum(r.scores)
-    s == 0 && return zeros(Float64, length(r.scores))
-    return r.scores ./ s
+    scores = _gatedScores(r)
+    s = sum(scores)
+    s == 0 && return zeros(Float64, length(scores))
+    return scores ./ s
 end
 
 """
@@ -119,7 +139,8 @@ acceptedGrid(r::CMPosteriorResult) = reshapeToGrid(r.cm_sample, r.accepted)
 """
     scoreGrid(r::CMPosteriorResult) -> Array{Float64}
 
-Reshape `scores` onto the CM parameter grid. Requires a `GridCMSample` layout.
+Reshape the scores onto the CM parameter grid, with 0 where a CM param_set fails the gate.
+Requires a `GridCMSample` layout.
 
 # Example
 ```julia
@@ -127,4 +148,4 @@ post = buildPosterior(sm, data, uq_results, cm_params)   # cm_params a regular g
 scoreGrid(post)   # Float64 array of size length.(cm_sample.axes)
 ```
 """
-scoreGrid(r::CMPosteriorResult) = reshapeToGrid(r.cm_sample, r.scores)
+scoreGrid(r::CMPosteriorResult) = reshapeToGrid(r.cm_sample, _gatedScores(r))
