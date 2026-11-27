@@ -45,7 +45,7 @@ What the gate does to a posterior's scores.
 [`buildPosterior`](@ref) and already reflected in `post.gate_pass`, `post.accepted`,
 [`scoreGrid`](@ref) and [`posteriorWeights`](@ref). Call it to see the gate's result in full.
 
-`applyGate(gate, post)` is the special case: it evaluates a *different* gate on the same raw
+`applyGate(gate, post)` is the special case: it evaluates a *different* gate on the same
 scores, to compare gates. It returns a result and leaves `post` (and `post.gate`) unchanged; to
 build a posterior with another gate, call `buildPosterior` again.
 
@@ -66,7 +66,7 @@ post = buildPosterior(sm, data, uq_results, cm_params; gate = IdentifiabilityMat
 g    = applyGate(post)
 count(.!g.pass)                   # how many CM param_sets fail the gate
 dropdims(count(g.mismatch; dims = 1); dims = 1)   # failures per SM parameter (rows) and side (columns)
-post.raw_scores[post.gate_pass]   # the scores of the CM param_sets that pass
+post.scores[post.gate_pass]   # the scores of the CM param_sets that pass
 
 applyGate(NullGate(), post).pass  # what another gate would do: here, everything passes
 ```
@@ -74,7 +74,7 @@ applyGate(NullGate(), post).pass  # what another gate would do: here, everything
 applyGate(post::CMPosteriorResult) = applyGate(post.gate, post)
 
 applyGate(gate::AbstractGate, post::CMPosteriorResult) =
-    gateScores(gate, post.raw_scores, post.uq_results, post.data_profiles)
+    gateScores(gate, post.scores, post.uq_results, post.data_profiles)
 
 """
     SmoreFit.gateScores(gate::AbstractGate, scores, uq_results, data_profiles) -> NamedTuple
@@ -190,7 +190,7 @@ CM param_sets with tied scores are accepted or rejected together.
 If fewer than three scores are positive, or no point lies below the line (including when all
 positive scores are equal), τ_elbow is 0, which accepts every positive score.
 
-Usually applied to the scores that pass the gate, `post.raw_scores[post.gate_pass]`;
+Usually applied to the scores that pass the gate, `post.scores[post.gate_pass]`;
 `buildPosterior(...; min_score = :elbow)` does exactly that.
 
 # Returns
@@ -202,8 +202,8 @@ A named tuple:
 
 # Example
 ```julia
-e = elbowThreshold(post.raw_scores[post.gate_pass])
-accepted = post.gate_pass .& (post.raw_scores .> e.tau)
+e = elbowThreshold(post.scores[post.gate_pass])
+accepted = post.gate_pass .& (post.scores .> e.tau)
 ```
 """
 function elbowThreshold(scores::AbstractVector{<:Real})

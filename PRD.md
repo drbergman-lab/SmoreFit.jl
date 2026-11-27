@@ -55,12 +55,11 @@ The SM fitting step (SmoreBase) produces SM parameters and their uncertainty for
     scores that pass the gate; the value used is stored. Any other symbol → `ArgumentError`.
   - `profile_options::ProfileLikelihood`, `p0`, `loss`, `interp`
 - Gates — `AbstractGate`:
-  - The gate lives on the posterior: `CMPosteriorResult` stores `gate`, `raw_scores` (the
-    bridge's scores, before any gate) and `gate_pass`. It does not store gated scores, and no
-    public function returns a failing cm_param_set's score as a score; the passing scores are
-    `raw_scores[gate_pass]`.
+  - The gate lives on the posterior: `CMPosteriorResult` stores `gate`, `scores` (the
+    bridge's scores) and `gate_pass`. A failing cm_param_set keeps its score in `scores` and
+    is treated as score 0 wherever a score is used; the passing scores are `scores[gate_pass]`.
   - Reads aligned with the CM grid treat a failing cm_param_set as score 0: `scoreGrid`,
-    `posteriorWeights`, the elbow, and `accepted = gate_pass .& (raw_scores .> min_score)`.
+    `posteriorWeights`, the elbow, and `accepted = gate_pass .& (scores .> min_score)`.
   - `NullGate` — every cm_param_set passes. The default.
   - `IdentifiabilityMatchGate` — a CI side is open when SmoreBase reports its bound as
     `nothing`; `openSides(plr)` gives the flags as `[n_sm_params × 2]`, columns (lower,
@@ -68,7 +67,7 @@ The SM fitting step (SmoreBase) produces SM parameters and their uncertainty for
     has the data's shape.
   - `applyGate(post)` → the stored gate's result: `scores` (0 where failing), `pass`, and for
     `IdentifiabilityMatchGate` `mismatch` (`[n_cm_param_sets × n_sm_params × 2]`). `applyGate(gate, post)` evaluates a different gate
-    on the same raw scores and leaves `post` unchanged (the special case). There is no method
+    on the same scores and leaves `post` unchanged (the special case). There is no method
     taking a new score vector.
   - Extension point, unexported: `SmoreFit.gateScores(gate, scores, uq_results,
     data_profiles)` → `(scores, pass, …)`; `buildPosterior` and `applyGate` call it.
@@ -86,7 +85,7 @@ The SM fitting step (SmoreBase) produces SM parameters and their uncertainty for
     `score > τ_elbow`, so the elbow point is rejected and tied scores share one fate.
   - Fewer than three positive scores, or no point below the line → τ_elbow = 0, with `note`
     saying which.
-- Output: `CMPosteriorResult` — stores `accepted`, `raw_scores` and `gate_pass` per cm_param_set plus the
+- Output: `CMPosteriorResult` — stores `accepted`, `scores` and `gate_pass` per cm_param_set plus the
   `cm_sample` (grid-aware), `cm_names`, the CM param_sets' `uq_results`, derived `lb_table`/`ub_table`,
   a prebuilt bounds interpolator, and the `box_score` used (interior queries reuse it).
 - The result records what built it:

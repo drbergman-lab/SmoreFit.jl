@@ -62,7 +62,7 @@ wrapped with `CMSample` (from SmoreBase: grid if possible, else scattered).
 - `gate::AbstractGate = NullGate()` — the posterior's gate, chosen here once and stored as
   `post.gate`. A cm_param_set that fails it counts as score 0 and is never accepted;
   [`IdentifiabilityMatchGate`](@ref) fails every cm_param_set whose CI shape (bounded or open,
-  per SM parameter and side) differs from the data's. `post.raw_scores` keeps the bridge's
+  per SM parameter and side) differs from the data's. `post.scores` keeps the bridge's
   scores and `post.gate_pass` records who passes; interior queries apply the same gate
 - `min_score::Union{Real,Symbol} = 0.0` — a cm_param_set is accepted iff it passes the gate
   and its score exceeds this; also the default threshold for [`inPosterior`](@ref) interior
