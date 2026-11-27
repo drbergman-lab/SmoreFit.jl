@@ -114,7 +114,7 @@ elbowThreshold(post.raw_scores[post.gate_pass])   # (tau, rank, n_positive, note
 
 **Gates are types.** `gate` takes any `AbstractGate`; the default `NullGate()` passes everything. The gate is a type parameter of `CMPosteriorResult{I,G}`, alongside the interpolator. To add a gate, subtype `AbstractGate` and define the unexported `SmoreFit.gateScores(gate, scores, uq_results, data_profiles)`; define `SmoreFit.gateInterior(gate, score, lb, ub, post)` as well if interior queries should work with it.
 
-**Interior queries apply the same gate.** For `IdentifiabilityMatchGate`, a side of the interpolated box counts as open when its bound sits at the edge of the profile range, and as bounded when it lies strictly inside. A point interpolated only from CM param_sets that are open on a side is therefore open there; one interpolated only from bounded CM param_sets is bounded.
+**Interior queries apply the same gate.** For `IdentifiabilityMatchGate`, a side of the interpolated box counts as open when its bound sits at the edge of the profile range, and as bounded when it lies strictly inside.
 
 The profile range of an SM parameter is normally its prior range. If the profiles were run with `ProfileLikelihood(bounds = ...)`, it is that range instead: SmoreBase needs `bounds` when the prior is unbounded (for example a Normal), and `bounds` can also narrow a finite prior range.
 

@@ -49,8 +49,7 @@ The gate uses only the CI shapes, never the scores, so it is the same for every 
 
 At an interior CM point the CI shape is read off the interpolated box: a side is open if the
 interpolated bound sits at the edge of the profile range, and bounded if it lies strictly
-inside. So a point interpolated only from CM param_sets that are open on a side is open there,
-and one interpolated only from bounded CM param_sets is bounded.
+inside.
 
 The **profile range** of an SM parameter is the range its profile covers:
 - normally, the SM prior range;
